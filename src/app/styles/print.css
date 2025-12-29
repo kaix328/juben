@@ -1,0 +1,264 @@
+/* 打印样式表 - PDF导出专用 */
+@media print {
+
+    /* 隐藏不需要打印的元素 */
+    .no-print,
+    header,
+    nav,
+    aside,
+    footer:not(.print-footer),
+    button,
+    .toolbar,
+    .sidebar,
+    .dialog,
+    .modal,
+    .toast,
+    [role="navigation"],
+    [role="banner"],
+    input,
+    select,
+    textarea {
+        display: none !important;
+    }
+
+    /* 显示打印模板 */
+    .print-template {
+        display: block !important;
+    }
+
+    /* 基础打印设置 */
+    body {
+        font-family: 'Microsoft YaHei', 'SimSun', sans-serif;
+        font-size: 12pt;
+        line-height: 1.5;
+        color: #000;
+        background: #fff;
+    }
+
+    /* 页面设置 - 支持页码 */
+    @page {
+        size: A4;
+        margin: 20mm 15mm 25mm 15mm;
+
+        /* 🆕 页脚区域显示页码 */
+        @bottom-center {
+            content: "第 " counter(page) " 页 / 共 " counter(pages) " 页";
+            font-size: 9pt;
+            color: #999;
+        }
+    }
+
+    /* 🆕 首页特殊处理 */
+    @page :first {
+        margin-top: 15mm;
+    }
+
+    /* 分页控制 */
+    .page-break {
+        page-break-after: always;
+    }
+
+    .no-page-break {
+        page-break-inside: avoid;
+    }
+
+    /* 🆕 强制新页开始 */
+    .page-break-before {
+        page-break-before: always;
+    }
+
+    /* 标题样式 */
+    .print-header {
+        text-align: center;
+        border-bottom: 2px solid #333;
+        padding-bottom: 8mm;
+        margin-bottom: 8mm;
+    }
+
+    .print-title {
+        font-size: 22pt;
+        font-weight: bold;
+        margin-bottom: 4mm;
+    }
+
+    .print-subtitle {
+        font-size: 11pt;
+        color: #666;
+    }
+
+    /* 🆕 页眉样式（每页显示） */
+    .print-page-header {
+        position: running(pageHeader);
+        font-size: 9pt;
+        color: #999;
+        border-bottom: 1px solid #eee;
+        padding-bottom: 2mm;
+        margin-bottom: 5mm;
+    }
+
+    /* 🆕 场景分组标题 */
+    .print-scene-group {
+        background: #f5f5f5;
+        padding: 3mm 5mm;
+        margin: 8mm 0 5mm 0;
+        font-weight: bold;
+        font-size: 12pt;
+        border-left: 4px solid #333;
+        page-break-after: avoid;
+    }
+
+    /* 分镜卡片样式（优化） */
+    .print-panel {
+        display: flex;
+        gap: 5mm;
+        margin-bottom: 6mm;
+        padding: 4mm;
+        border: 1px solid #ddd;
+        border-radius: 2mm;
+        page-break-inside: avoid;
+        background: #fafafa;
+    }
+
+    /* 🆕 图片溢出保护 */
+    .print-panel-image {
+        width: 55mm;
+        min-width: 55mm;
+        max-width: 55mm;
+        height: auto;
+        max-height: 45mm;
+        object-fit: contain;
+        border: 1px solid #ddd;
+        background: #fff;
+    }
+
+    .print-panel-image-placeholder {
+        width: 55mm;
+        height: 32mm;
+        background: #f0f0f0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #999;
+        font-size: 9pt;
+        border: 1px dashed #ccc;
+    }
+
+    .print-panel-content {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .print-panel-number {
+        font-size: 13pt;
+        font-weight: bold;
+        color: #333;
+        margin-bottom: 2mm;
+        border-bottom: 1px solid #eee;
+        padding-bottom: 1mm;
+    }
+
+    .print-panel-desc {
+        font-size: 10pt;
+        color: #333;
+        margin-bottom: 2mm;
+        line-height: 1.4;
+    }
+
+    .print-panel-dialogue {
+        font-size: 10pt;
+        color: #444;
+        font-style: italic;
+        padding: 2mm 0 2mm 4mm;
+        border-left: 2px solid #999;
+        margin: 2mm 0;
+        background: #fff;
+    }
+
+    .print-panel-meta {
+        font-size: 8pt;
+        color: #888;
+        margin-top: 2mm;
+    }
+
+    /* 🆕 提示词区域（可选显示） */
+    .print-panel-prompt {
+        font-size: 8pt;
+        color: #666;
+        margin-top: 2mm;
+        padding: 2mm;
+        background: #fff;
+        border: 1px dashed #ddd;
+        word-break: break-all;
+    }
+
+    /* ============ 🆕 表格布局模式 ============ */
+    .print-table-layout {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 10mm;
+    }
+
+    .print-table-layout th,
+    .print-table-layout td {
+        border: 1px solid #333;
+        padding: 2mm 3mm;
+        vertical-align: top;
+        font-size: 9pt;
+    }
+
+    .print-table-layout th {
+        background: #e8e8e8;
+        font-weight: bold;
+        text-align: center;
+        font-size: 10pt;
+    }
+
+    .print-table-layout td:first-child {
+        text-align: center;
+        font-weight: bold;
+        width: 10mm;
+    }
+
+    .print-table-layout td:nth-child(2) {
+        width: 50mm;
+        padding: 1mm;
+    }
+
+    .print-table-layout td img {
+        width: 100%;
+        max-height: 35mm;
+        object-fit: contain;
+    }
+
+    /* 页脚 */
+    .print-footer {
+        position: fixed;
+        bottom: 5mm;
+        left: 15mm;
+        right: 15mm;
+        text-align: center;
+        font-size: 8pt;
+        color: #aaa;
+        border-top: 1px solid #eee;
+        padding-top: 2mm;
+    }
+
+    /* 🆕 统计信息区 */
+    .print-stats {
+        margin-top: 10mm;
+        padding: 5mm;
+        background: #f9f9f9;
+        border: 1px solid #ddd;
+        font-size: 9pt;
+    }
+
+    .print-stats-title {
+        font-weight: bold;
+        margin-bottom: 3mm;
+    }
+
+    .print-stats-item {
+        display: inline-block;
+        margin-right: 8mm;
+    }
+}
