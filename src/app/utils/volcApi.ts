@@ -176,12 +176,34 @@ export async function callDoubaoImage(
   return data.data[0].url;
 }
 
-// 3. Prompt 优化器 (Enhanced)
+// 3. Prompt 优化器 (Enhanced) - 🆕 支持完整 DirectorStyle 对象
+import type { DirectorStyle } from '../types';
+
+// 🆕 辅助函数：从 DirectorStyle 构建风格描述
+function buildStyleDescription(style?: DirectorStyle): string {
+  if (!style) return 'Cinematic';
+
+  const parts: string[] = [];
+  if (style.artStyle) parts.push(style.artStyle);
+  if (style.colorTone) parts.push(style.colorTone);
+  if (style.lightingStyle) parts.push(style.lightingStyle);
+  if (style.cameraStyle) parts.push(style.cameraStyle);
+  if (style.mood) parts.push(`${style.mood}氛围`);
+  if (style.customPrompt) parts.push(style.customPrompt);
+
+  return parts.length > 0 ? parts.join(', ') : 'Cinematic';
+}
+
 export async function optimizePrompt(
   description: string,
-  style: string = 'Cinematic',
+  styleOrString: string | DirectorStyle = 'Cinematic',  // 🆕 兼容旧 API
   resourceType?: 'character' | 'scene' | 'prop' | 'costume' | 'storyboard'
 ): Promise<string> {
+  // 🆕 兼容处理：支持字符串或对象类型
+  const style = typeof styleOrString === 'string'
+    ? styleOrString
+    : buildStyleDescription(styleOrString);
+
   // 根据资源类型使用不同的系统提示
   let systemPrompt = '';
 

@@ -70,9 +70,10 @@ export function useStoryboardActions({
                 execute: async () => {
                     let finalPrompt = panel.aiPrompt;
                     if (optimize) {
+                        // 🆕 传递完整的导演风格对象
                         finalPrompt = await optimizePrompt(
                             panel.description,
-                            project.directorStyle?.artStyle || 'Cinematic',
+                            project.directorStyle || 'Cinematic',
                             'storyboard'
                         );
                     }
@@ -109,7 +110,21 @@ export function useStoryboardActions({
 
     }, [storyboard, project, onUpdateStoryboard, queue]);
 
-    // 生成单张预览图（🆕 修复：生成后自动保存）
+    // 🆕 辅助函数：计算风格哈希
+    const computeStyleHash = useCallback((style?: Project['directorStyle']): string => {
+        if (!style) return 'default';
+        const str = JSON.stringify(style);
+        // 简单哈希算法
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) {
+            const char = str.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash;
+        }
+        return `style_${Math.abs(hash).toString(16).substring(0, 8)}`;
+    }, []);
+
+    // 生成单张预览图（🆕 修复：生成后自动保存 + 记录风格快照）
     const handleGenerateImage = useCallback(async (panel: StoryboardPanel) => {
         if (!assets || !project || !storyboard) return;
 
@@ -124,9 +139,17 @@ export function useStoryboardActions({
                 true // enableOptimization
             );
 
-            // 🆕 自动保存到分镜 (使用 generatedImage 字段)
+            // 🆕 计算风格哈希用于追溯
+            const styleHash = computeStyleHash(project.directorStyle);
+
+            // 🆕 自动保存到分镜 (使用 generatedImage 字段 + 风格快照)
             const updatedPanels = storyboard.panels.map(p =>
-                p.id === panel.id ? { ...p, generatedImage: imageUrl } : p
+                p.id === panel.id ? {
+                    ...p,
+                    generatedImage: imageUrl,
+                    appliedStyleHash: styleHash,  // 🆕 记录风格哈希
+                    generatedAt: new Date().toISOString()  // 🆕 记录生成时间
+                } : p
             );
             await onUpdateStoryboard({ ...storyboard, panels: updatedPanels });
 
@@ -136,7 +159,7 @@ export function useStoryboardActions({
             console.error('Failed to generate image:', error);
             toast.error('生成图片失败', { id: `img-${panel.id}` });
         }
-    }, [assets, project, storyboard, onUpdateStoryboard]);
+    }, [assets, project, storyboard, onUpdateStoryboard, computeStyleHash]);
 
     // 复制分镜
     const handleCopyPanel = useCallback(async (panel: StoryboardPanel) => {

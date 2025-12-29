@@ -41,14 +41,14 @@ export function Layout() {
         <div className="w-full px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center gap-4">
-              {/* 使用原生<a>标签而非React Router Link,避免复杂组件unmount时的DOM冲突 */}
-              <a
-                href={getBackPath()}
+              {/* 使用 Link 组件确保 HashRouter 正确处理导航 */}
+              <Link
+                to={getBackPath()}
                 className="p-2 hover:bg-gray-100 rounded-lg transition-colors inline-block"
                 title="返回"
               >
                 <ArrowLeft className="w-5 h-5 text-gray-600" />
-              </a>
+              </Link>
               <Link to="/" className="flex items-center gap-2">
                 <Book className="w-8 h-8 text-purple-600" />
                 <span className="text-xl text-gray-900">AI漫剧制作平台</span>

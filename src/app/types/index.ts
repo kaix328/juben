@@ -268,6 +268,10 @@ export interface StoryboardPanel {
   environmentMotion?: string;       // 环境动态描述（如：风吹树叶）
   characterActions?: string[];      // 角色动作列表（如：["张三:转身", "李四:挥手"]）
   aspectRatio?: '16:9' | '9:16' | '1:1' | '4:3' | '21:9'; // 🆕 视频宽高比
+
+  // 🆕 建议3：风格快照字段 - 用于追溯分镜生成时使用的风格
+  appliedStyleHash?: string;   // 生成时导演风格的哈希值
+  generatedAt?: string;        // 图片生成时间戳
 }
 
 // 项目资源库类型

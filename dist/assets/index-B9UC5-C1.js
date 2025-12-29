@@ -1,6 +1,6 @@
-import { j as jsxRuntimeExports, S as Slot, O as Overlay, R as Root$5, T as Trigger$1, C as Content, a as Close, b as Title, D as Description, P as Portal$1, c as Primitive, d as createPopperScope, u as useDirection, e as useControllableState, f as Root2$2, g as createContextScope, h as useId, i as createCollection, k as useComposedRefs, A as Anchor, l as composeEventHandlers, m as useLayoutEffect2, n as Portal$2, V as VisuallyHidden, o as useCallbackRef, p as hideOthers, q as useFocusGuards, r as ReactRemoveScroll, F as FocusScope, s as DismissableLayer, t as Content$1, v as Arrow, w as Root2$3, L as List, x as Trigger$2, y as Content$2, z as Root2$4, B as Trigger$3, E as Portal2$1, G as Content2$2, I as Item2, H as Label2, J as Separator2, K as Presence, M as useSize, N as createDialogScope, W as WarningProvider, Q as Slottable } from "./vendor-ui-BtODsxAo.js";
-import { f as requireReactDom, d as React, c as ReactDOM, u as useLocation, L as Link, O as Outlet, a as reactExports, b as reactDomExports, h as useParams, g as getDefaultExportFromCjs, i as useNavigate, B as BrowserRouter, j as Routes, k as Route, N as Navigate } from "./vendor-react-DHi-pKEP.js";
-import { A as ArrowLeft, B as Book, H as House, S as Settings$1, T as TriangleAlert, R as RefreshCw, D as Dexie, X, C as ChevronDown, a as Check, b as ChevronUp, c as Search, d as ArrowDownWideNarrow, P as Plus, e as Trash2, f as Calendar, g as ChevronRight, h as ChartColumn, i as Palette, L as Library, F as FileText, j as Film, k as Layers, l as Save, m as create, M as MessageCircle, U as Users, n as Clock, o as Sparkles, p as PenLine, q as Pen, r as CircleAlert, s as CircleCheckBig, t as LoaderCircle, u as ChartNoAxesColumn, v as Replace, w as Undo2, x as Redo2, y as Download, z as SquareCheckBig, E as List$1, G as Grid3x3, W as WandSparkles, I as FileDown, J as History, K as Camera, N as MessageSquare, O as Maximize2, Q as Copy, V as Settings2, Y as Image, Z as Volume2, _ as Music, $ as Eye, a0 as Lightbulb, a1 as Video, a2 as GripVertical, a3 as Play, a4 as CircleX, a5 as RotateCcw, a6 as ZoomOut, a7 as ZoomIn, a8 as SkipBack, a9 as Pause, aa as SkipForward, ab as Upload, ac as MapPin, ad as Package, ae as Shirt, af as RotateCw, ag as Square, ah as Tag, ai as Map$1, aj as SquarePen, ak as TrendingUp, al as CircleCheck, am as Box, an as Info, ao as Server, ap as Key } from "./vendor-utils-DZHkKugO.js";
+import { j as jsxRuntimeExports, S as Slot, O as Overlay, R as Root$5, T as Trigger$1, C as Content, a as Close, b as Title, D as Description, P as Portal$1, c as Primitive, d as createPopperScope, u as useDirection, e as useControllableState, f as Root2$2, g as createContextScope, h as useId, i as createCollection, k as useComposedRefs, A as Anchor, l as composeEventHandlers, m as useLayoutEffect2, n as Portal$2, V as VisuallyHidden, o as useCallbackRef, p as hideOthers, q as useFocusGuards, r as ReactRemoveScroll, F as FocusScope, s as DismissableLayer, t as Content$1, v as Arrow, w as Root2$3, L as List, x as Trigger$2, y as Content$2, z as Root2$4, B as Trigger$3, E as Portal2$1, G as Content2$2, I as Item2, H as Label2, J as Separator2, K as Presence, M as useSize, N as createDialogScope, W as WarningProvider, Q as Slottable } from "./vendor-ui-D1RflOLB.js";
+import { f as requireReactDom, d as React, c as ReactDOM, u as useLocation, L as Link, O as Outlet, a as reactExports, b as reactDomExports, h as useParams, g as getDefaultExportFromCjs, i as useNavigate, H as HashRouter, j as Routes, k as Route, N as Navigate } from "./vendor-react-DeScL_Wg.js";
+import { A as ArrowLeft, B as Book, H as House, S as Settings$1, T as TriangleAlert, R as RefreshCw, D as Dexie, X, C as ChevronDown, a as Check, b as ChevronUp, c as Search, d as ArrowDownWideNarrow, P as Plus, e as Trash2, f as Calendar, g as ChevronRight, h as ChartColumn, i as Palette, L as Library, F as FileText, j as Film, k as Layers, l as Save, m as create, M as MessageCircle, U as Users, n as Clock, o as Sparkles, p as PenLine, q as Pen, r as CircleAlert, s as CircleCheckBig, t as LoaderCircle, u as ChartNoAxesColumn, v as Replace, w as Undo2, x as Redo2, y as Download, z as SquareCheckBig, E as List$1, G as Grid3x3, W as WandSparkles, I as FileDown, J as History, K as Camera, N as MessageSquare, O as Maximize2, Q as Copy, V as Settings2, Y as Image, Z as Volume2, _ as Music, $ as Eye, a0 as Lightbulb, a1 as Video, a2 as GripVertical, a3 as Play, a4 as CircleX, a5 as RotateCcw, a6 as ZoomOut, a7 as ZoomIn, a8 as SkipBack, a9 as Pause, aa as SkipForward, ab as Upload, ac as MapPin, ad as Package, ae as Shirt, af as RotateCw, ag as Square, ah as Tag, ai as Map$1, aj as SquarePen, ak as TrendingUp, al as CircleCheck, am as Box, an as Info, ao as Server, ap as Key } from "./vendor-utils-COiYwPjn.js";
 (function polyfill() {
   const relList = document.createElement("link").relList;
   if (relList && relList.supports && relList.supports("modulepreload")) {
@@ -1141,9 +1141,9 @@ function Layout() {
     /* @__PURE__ */ jsxRuntimeExports.jsx("header", { className: "bg-white shadow-sm border-b sticky top-0 z-50", children: /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-full px-4 sm:px-6 lg:px-8", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex justify-between items-center h-16", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-4", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "a",
+          Link,
           {
-            href: getBackPath(),
+            to: getBackPath(),
             className: "p-2 hover:bg-gray-100 rounded-lg transition-colors inline-block",
             title: "返回",
             children: /* @__PURE__ */ jsxRuntimeExports.jsx(ArrowLeft, { className: "w-5 h-5 text-gray-600" })
@@ -4237,7 +4237,7 @@ class ErrorBoundary extends React.Component {
       window.location.reload();
     };
     this.handleGoHome = () => {
-      window.location.href = "/";
+      window.location.href = window.location.pathname + "#/";
     };
     this.state = { hasError: false };
   }
@@ -6662,8 +6662,8 @@ function DropdownMenuSeparator({
   );
 }
 const scriptRel = "modulepreload";
-const assetsURL = function(dep, importerUrl) {
-  return new URL(dep, importerUrl).href;
+const assetsURL = function(dep) {
+  return "/juben/" + dep;
 };
 const seen = {};
 const __vitePreload = function preload(baseModule, deps, importerUrl) {
@@ -6679,27 +6679,19 @@ const __vitePreload = function preload(baseModule, deps, importerUrl) {
         )
       );
     };
-    const links = document.getElementsByTagName("link");
+    document.getElementsByTagName("link");
     const cspNonceMeta = document.querySelector(
       "meta[property=csp-nonce]"
     );
     const cspNonce = (cspNonceMeta == null ? void 0 : cspNonceMeta.nonce) || (cspNonceMeta == null ? void 0 : cspNonceMeta.getAttribute("nonce"));
     promise = allSettled2(
       deps.map((dep) => {
-        dep = assetsURL(dep, importerUrl);
+        dep = assetsURL(dep);
         if (dep in seen) return;
         seen[dep] = true;
         const isCss = dep.endsWith(".css");
         const cssSelector = isCss ? '[rel="stylesheet"]' : "";
-        const isBaseRelative = !!importerUrl;
-        if (isBaseRelative) {
-          for (let i = links.length - 1; i >= 0; i--) {
-            const link2 = links[i];
-            if (link2.href === dep && (!isCss || link2.rel === "stylesheet")) {
-              return;
-            }
-          }
-        } else if (document.querySelector(`link[href="${dep}"]${cssSelector}`)) {
+        if (document.querySelector(`link[href="${dep}"]${cssSelector}`)) {
           return;
         }
         const link = document.createElement("link");
@@ -7052,7 +7044,19 @@ async function callDoubaoImage(prompt, size = "1920x1920", negativePrompt) {
   });
   return data.data[0].url;
 }
-async function optimizePrompt(description, style = "Cinematic", resourceType) {
+function buildStyleDescription(style) {
+  if (!style) return "Cinematic";
+  const parts = [];
+  if (style.artStyle) parts.push(style.artStyle);
+  if (style.colorTone) parts.push(style.colorTone);
+  if (style.lightingStyle) parts.push(style.lightingStyle);
+  if (style.cameraStyle) parts.push(style.cameraStyle);
+  if (style.mood) parts.push(`${style.mood}氛围`);
+  if (style.customPrompt) parts.push(style.customPrompt);
+  return parts.length > 0 ? parts.join(", ") : "Cinematic";
+}
+async function optimizePrompt(description, styleOrString = "Cinematic", resourceType) {
+  const style = typeof styleOrString === "string" ? styleOrString : buildStyleDescription(styleOrString);
   let systemPrompt = "";
   if (resourceType === "character") {
     systemPrompt = `你是专业的AI绘画提示词专家,专注于角色设计。
@@ -9829,14 +9833,14 @@ async function generateStoryboardImage(panel, characters, scenes, directorStyle,
   const { generateStoryboardImagePrompt: generateStoryboardImagePrompt2 } = await __vitePreload(async () => {
     const { generateStoryboardImagePrompt: generateStoryboardImagePrompt22 } = await Promise.resolve().then(() => promptGenerator);
     return { generateStoryboardImagePrompt: generateStoryboardImagePrompt22 };
-  }, true ? void 0 : void 0, import.meta.url);
+  }, true ? void 0 : void 0);
   let imagePrompt = generateStoryboardImagePrompt2(panel, characters, scenes, directorStyle);
   if (enableOptimization) {
     try {
       const { optimizePrompt: optimizePrompt2 } = await __vitePreload(async () => {
         const { optimizePrompt: optimizePrompt22 } = await Promise.resolve().then(() => volcApi);
         return { optimizePrompt: optimizePrompt22 };
-      }, true ? void 0 : void 0, import.meta.url);
+      }, true ? void 0 : void 0);
       imagePrompt = await optimizePrompt2(
         imagePrompt,
         (directorStyle == null ? void 0 : directorStyle.artStyle) || "Cinematic",
@@ -9849,11 +9853,11 @@ async function generateStoryboardImage(panel, characters, scenes, directorStyle,
   const { IMAGE_SIZES: IMAGE_SIZES2 } = await __vitePreload(async () => {
     const { IMAGE_SIZES: IMAGE_SIZES3 } = await Promise.resolve().then(() => imageSizes);
     return { IMAGE_SIZES: IMAGE_SIZES3 };
-  }, true ? void 0 : void 0, import.meta.url);
+  }, true ? void 0 : void 0);
   const { callDoubaoImage: callDoubaoImage2 } = await __vitePreload(async () => {
     const { callDoubaoImage: callDoubaoImage22 } = await Promise.resolve().then(() => volcApi);
     return { callDoubaoImage: callDoubaoImage22 };
-  }, true ? void 0 : void 0, import.meta.url);
+  }, true ? void 0 : void 0);
   let selectedSize = IMAGE_SIZES2.STORYBOARD;
   if (panel.aspectRatio) {
     const aspectSizeMap = {
@@ -15643,7 +15647,7 @@ function useStoryboardData({ chapterId }) {
     const { versionStorage: versionStorage2 } = await __vitePreload(async () => {
       const { versionStorage: versionStorage3 } = await Promise.resolve().then(() => storage);
       return { versionStorage: versionStorage3 };
-    }, true ? void 0 : void 0, import.meta.url);
+    }, true ? void 0 : void 0);
     const vData = await versionStorage2.getAll();
     setVersions(vData.filter((v) => v.chapterId === chapterId));
   }, [chapterId]);
@@ -15653,7 +15657,7 @@ function useStoryboardData({ chapterId }) {
       const { versionStorage: versionStorage2, generateId: generateId2 } = await __vitePreload(async () => {
         const { versionStorage: versionStorage3, generateId: generateId3 } = await Promise.resolve().then(() => storage);
         return { versionStorage: versionStorage3, generateId: generateId3 };
-      }, true ? void 0 : void 0, import.meta.url);
+      }, true ? void 0 : void 0);
       const version = {
         id: generateId2(),
         chapterId,
@@ -15674,7 +15678,7 @@ function useStoryboardData({ chapterId }) {
       const { versionStorage: versionStorage2 } = await __vitePreload(async () => {
         const { versionStorage: versionStorage3 } = await Promise.resolve().then(() => storage);
         return { versionStorage: versionStorage3 };
-      }, true ? void 0 : void 0, import.meta.url);
+      }, true ? void 0 : void 0);
       const version = await versionStorage2.getById(versionId);
       if (version && version.data) {
         await handleSave(version.data);
@@ -15689,7 +15693,7 @@ function useStoryboardData({ chapterId }) {
       const { versionStorage: versionStorage2 } = await __vitePreload(async () => {
         const { versionStorage: versionStorage3 } = await Promise.resolve().then(() => storage);
         return { versionStorage: versionStorage3 };
-      }, true ? void 0 : void 0, import.meta.url);
+      }, true ? void 0 : void 0);
       await versionStorage2.delete(versionId);
       await loadVersions();
       toast.success("版本记录已删除");
@@ -16225,12 +16229,11 @@ function useStoryboardActions({
     const tasks = storyboard.panels.filter((p) => selectedIds.has(p.id)).map((panel) => ({
       id: panel.id,
       execute: async () => {
-        var _a;
         let finalPrompt = panel.aiPrompt;
         if (optimize) {
           finalPrompt = await optimizePrompt(
             panel.description,
-            ((_a = project.directorStyle) == null ? void 0 : _a.artStyle) || "Cinematic",
+            project.directorStyle || "Cinematic",
             "storyboard"
           );
         }
@@ -16258,6 +16261,17 @@ function useStoryboardActions({
       onComplete == null ? void 0 : onComplete();
     }
   }, [storyboard, project, onUpdateStoryboard, queue]);
+  const computeStyleHash = reactExports.useCallback((style) => {
+    if (!style) return "default";
+    const str = JSON.stringify(style);
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i);
+      hash = (hash << 5) - hash + char;
+      hash = hash & hash;
+    }
+    return `style_${Math.abs(hash).toString(16).substring(0, 8)}`;
+  }, []);
   const handleGenerateImage = reactExports.useCallback(async (panel) => {
     if (!assets || !project || !storyboard) return;
     toast.loading("正在生成预览图...", { id: `img-${panel.id}` });
@@ -16270,8 +16284,16 @@ function useStoryboardActions({
         true
         // enableOptimization
       );
+      const styleHash = computeStyleHash(project.directorStyle);
       const updatedPanels = storyboard.panels.map(
-        (p) => p.id === panel.id ? { ...p, generatedImage: imageUrl } : p
+        (p) => p.id === panel.id ? {
+          ...p,
+          generatedImage: imageUrl,
+          appliedStyleHash: styleHash,
+          // 🆕 记录风格哈希
+          generatedAt: (/* @__PURE__ */ new Date()).toISOString()
+          // 🆕 记录生成时间
+        } : p
       );
       await onUpdateStoryboard({ ...storyboard, panels: updatedPanels });
       toast.success("预览图已生成", { id: `img-${panel.id}` });
@@ -16280,7 +16302,7 @@ function useStoryboardActions({
       console.error("Failed to generate image:", error);
       toast.error("生成图片失败", { id: `img-${panel.id}` });
     }
-  }, [assets, project, storyboard, onUpdateStoryboard]);
+  }, [assets, project, storyboard, onUpdateStoryboard, computeStyleHash]);
   const handleCopyPanel = reactExports.useCallback(async (panel) => {
     if (!storyboard) return;
     const newPanel = {
@@ -17368,7 +17390,7 @@ function useAssetData({ projectId }) {
           batchApplyStyleToProps: batchApplyStyleToProps3,
           batchApplyStyleToCostumes: batchApplyStyleToCostumes3
         };
-      }, true ? void 0 : void 0, import.meta.url);
+      }, true ? void 0 : void 0);
       const syncedAssets = {
         ...updatedAssetsPreSync,
         characters: batchApplyStyleToCharacters2(updatedAssetsPreSync.characters, project.directorStyle),
@@ -22104,6 +22126,79 @@ function DirectorStyleEditor() {
       safeToast(`已应用 ${presetName}`);
     }
   };
+  const [isApplyingToAll, setIsApplyingToAll] = reactExports.useState(false);
+  const handleApplyStyleToAllPanels = reactExports.useCallback(async () => {
+    if (!currentProject || !projectId || !isMountedRef.current) return;
+    await handleSave();
+    const confirmed = window.confirm(
+      "确定要将当前导演风格应用到项目中所有分镜的提示词吗？\n\n这将为每个分镜重新生成优化后的AI提示词，可能需要一些时间。"
+    );
+    if (!confirmed) return;
+    setIsApplyingToAll(true);
+    const toastId = "apply-style-to-all";
+    toast.loading("正在加载项目分镜...", { id: toastId });
+    try {
+      const chapters = await chapterStorage.getByProjectId(projectId);
+      if (!chapters || chapters.length === 0) {
+        toast.warning("项目中没有章节", { id: toastId });
+        setIsApplyingToAll(false);
+        return;
+      }
+      let totalPanels = 0;
+      let processedPanels = 0;
+      const storyboards = [];
+      for (const chapter of chapters) {
+        const sb = await storyboardStorage.getByChapterId(chapter.id);
+        if (sb && sb.panels && sb.panels.length > 0) {
+          storyboards.push(sb);
+          totalPanels += sb.panels.length;
+        }
+      }
+      if (totalPanels === 0) {
+        toast.warning("项目中没有分镜面板", { id: toastId });
+        setIsApplyingToAll(false);
+        return;
+      }
+      toast.loading(`正在更新 ${totalPanels} 个分镜的提示词...`, { id: toastId });
+      for (const storyboard of storyboards) {
+        const updatedPanels = await Promise.all(
+          storyboard.panels.map(async (panel) => {
+            try {
+              const newPrompt = await optimizePrompt(
+                panel.description || "",
+                style,
+                // 传递完整的导演风格对象
+                "storyboard"
+              );
+              processedPanels++;
+              toast.loading(`已处理 ${processedPanels}/${totalPanels} 个分镜...`, { id: toastId });
+              return {
+                ...panel,
+                aiPrompt: newPrompt,
+                appliedStyleHash: `style_${Date.now().toString(16).substring(0, 8)}`,
+                generatedAt: (/* @__PURE__ */ new Date()).toISOString()
+              };
+            } catch (error) {
+              console.error(`Failed to update panel ${panel.id}:`, error);
+              processedPanels++;
+              return panel;
+            }
+          })
+        );
+        await storyboardStorage.save({
+          ...storyboard,
+          panels: updatedPanels,
+          updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+        });
+      }
+      toast.success(`已成功更新 ${processedPanels} 个分镜的提示词！`, { id: toastId });
+    } catch (error) {
+      console.error("Failed to apply style to all panels:", error);
+      toast.error("应用风格时出错，请稍后重试", { id: toastId });
+    } finally {
+      setIsApplyingToAll(false);
+    }
+  }, [currentProject, projectId, style, handleSave]);
   if (!currentProject) {
     return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex items-center justify-center h-64", children: /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-gray-500", children: "加载项目配置中..." }) });
   }
@@ -22153,7 +22248,20 @@ function DirectorStyleEditor() {
         /* @__PURE__ */ jsxRuntimeExports.jsxs(Button, { onClick: handleSave, className: "gap-2", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx(Save, { className: "w-4 h-4" }),
           "保存风格"
-        ] })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          Button,
+          {
+            variant: "secondary",
+            onClick: handleApplyStyleToAllPanels,
+            disabled: isApplyingToAll,
+            className: "gap-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600",
+            children: [
+              isApplyingToAll ? /* @__PURE__ */ jsxRuntimeExports.jsx(RefreshCw, { className: "w-4 h-4 animate-spin" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(Layers, { className: "w-4 h-4" }),
+              isApplyingToAll ? "正在应用..." : "应用到所有分镜"
+            ]
+          }
+        )
       ] })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs(Card, { className: "bg-gradient-to-r from-purple-50 to-pink-50 border-purple-200", children: [
@@ -22429,6 +22537,26 @@ function DirectorStyleEditor() {
             /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "分镜的AI绘画提示词生成" }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "分镜的AI视频提示词生成" })
           ] })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-4 p-4 bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-lg", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-medium text-purple-900 mb-3", children: "📸 示例分镜提示词预览（基于当前风格）" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white rounded-md p-4 border", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-gray-500 mb-2", children: "示例场景：森林中奔跑的少年" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-sm font-mono text-gray-700 leading-relaxed", children: [
+              "中景镜头，年轻少年在森林小径上奔跑",
+              style.artStyle && `，${style.artStyle}风格`,
+              style.colorTone && `，${style.colorTone}`,
+              style.lightingStyle && `，${style.lightingStyle}照明`,
+              style.cameraStyle && `，${style.cameraStyle}镜头`,
+              style.mood && `，${style.mood}的氛围`,
+              "，高质量渲染，分镜级别细节",
+              style.customPrompt && `，${style.customPrompt}`
+            ] })
+          ] }),
+          style.negativePrompt && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-3 bg-red-50 rounded-md p-3 border border-red-200", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-red-600 mb-1", children: "负面提示词：" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs font-mono text-red-700", children: style.negativePrompt })
+          ] })
         ] })
       ] })
     ] }),
@@ -22584,7 +22712,7 @@ function App() {
   reactExports.useEffect(() => {
     initializeDemoData();
   }, []);
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs(BrowserRouter, { children: [
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs(HashRouter, { children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx(Toaster, { position: "top-center", richColors: true }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(Routes, { children: /* @__PURE__ */ jsxRuntimeExports.jsxs(Route, { path: "/", element: /* @__PURE__ */ jsxRuntimeExports.jsx(Layout, {}), children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx(Route, { index: true, element: /* @__PURE__ */ jsxRuntimeExports.jsx(Bookshelf, {}) }),

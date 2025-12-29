@@ -1,18 +1,19 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Palette, Save, Sparkles, Wand2, RotateCcw } from 'lucide-react';
+import { Palette, Save, Sparkles, Wand2, RotateCcw, RefreshCw, Layers } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Label } from '../components/ui/label';
 import { Textarea } from '../components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { StyleApplicationSettingsPanel } from '../components/StyleApplicationSettings';
-import type { Project, DirectorStyle, StyleApplicationSettings } from '../types';
-import { projectStorage } from '../utils/storage';
+import type { Project, DirectorStyle, StyleApplicationSettings, Storyboard, Chapter } from '../types';
+import { projectStorage, chapterStorage, storyboardStorage } from '../utils/storage';
 import { DIRECTOR_STYLE_PRESETS } from '../utils/promptGenerator';
 import { toast } from 'sonner';
 import { useProjectStore } from '../store/useProjectStore';
 import { useConfigStore } from '../store/useConfigStore';
+import { optimizePrompt } from '../utils/volcApi';
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -167,6 +168,100 @@ export function DirectorStyleEditor() {
     }
   };
 
+  // 🆕 建议4：应用风格到所有分镜的功能
+  const [isApplyingToAll, setIsApplyingToAll] = useState(false);
+
+  const handleApplyStyleToAllPanels = useCallback(async () => {
+    if (!currentProject || !projectId || !isMountedRef.current) return;
+
+    // 先保存当前风格
+    await handleSave();
+
+    const confirmed = window.confirm(
+      '确定要将当前导演风格应用到项目中所有分镜的提示词吗？\n\n' +
+      '这将为每个分镜重新生成优化后的AI提示词，可能需要一些时间。'
+    );
+    if (!confirmed) return;
+
+    setIsApplyingToAll(true);
+    const toastId = 'apply-style-to-all';
+    toast.loading('正在加载项目分镜...', { id: toastId });
+
+    try {
+      // 1. 获取所有章节
+      const chapters = await chapterStorage.getByProjectId(projectId);
+      if (!chapters || chapters.length === 0) {
+        toast.warning('项目中没有章节', { id: toastId });
+        setIsApplyingToAll(false);
+        return;
+      }
+
+      // 2. 获取所有分镜
+      let totalPanels = 0;
+      let processedPanels = 0;
+      const storyboards: Storyboard[] = [];
+
+      for (const chapter of chapters) {
+        const sb = await storyboardStorage.getByChapterId(chapter.id);
+        if (sb && sb.panels && sb.panels.length > 0) {
+          storyboards.push(sb);
+          totalPanels += sb.panels.length;
+        }
+      }
+
+      if (totalPanels === 0) {
+        toast.warning('项目中没有分镜面板', { id: toastId });
+        setIsApplyingToAll(false);
+        return;
+      }
+
+      toast.loading(`正在更新 ${totalPanels} 个分镜的提示词...`, { id: toastId });
+
+      // 3. 批量更新每个分镜的提示词
+      for (const storyboard of storyboards) {
+        const updatedPanels = await Promise.all(
+          storyboard.panels.map(async (panel) => {
+            try {
+              // 使用 optimizePrompt 重新生成提示词（传递完整风格）
+              const newPrompt = await optimizePrompt(
+                panel.description || '',
+                style,  // 传递完整的导演风格对象
+                'storyboard'
+              );
+              processedPanels++;
+              toast.loading(`已处理 ${processedPanels}/${totalPanels} 个分镜...`, { id: toastId });
+
+              return {
+                ...panel,
+                aiPrompt: newPrompt,
+                appliedStyleHash: `style_${Date.now().toString(16).substring(0, 8)}`,
+                generatedAt: new Date().toISOString()
+              };
+            } catch (error) {
+              console.error(`Failed to update panel ${panel.id}:`, error);
+              processedPanels++;
+              return panel; // 保持原样
+            }
+          })
+        );
+
+        // 保存更新后的分镜
+        await storyboardStorage.save({
+          ...storyboard,
+          panels: updatedPanels,
+          updatedAt: new Date().toISOString()
+        });
+      }
+
+      toast.success(`已成功更新 ${processedPanels} 个分镜的提示词！`, { id: toastId });
+    } catch (error) {
+      console.error('Failed to apply style to all panels:', error);
+      toast.error('应用风格时出错，请稍后重试', { id: toastId });
+    } finally {
+      setIsApplyingToAll(false);
+    }
+  }, [currentProject, projectId, style, handleSave]);
+
   if (!currentProject) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -228,6 +323,20 @@ export function DirectorStyleEditor() {
           <Button onClick={handleSave} className="gap-2">
             <Save className="w-4 h-4" />
             保存风格
+          </Button>
+          {/* 🆕 建议4：应用到所有分镜按钮 */}
+          <Button
+            variant="secondary"
+            onClick={handleApplyStyleToAllPanels}
+            disabled={isApplyingToAll}
+            className="gap-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600"
+          >
+            {isApplyingToAll ? (
+              <RefreshCw className="w-4 h-4 animate-spin" />
+            ) : (
+              <Layers className="w-4 h-4" />
+            )}
+            {isApplyingToAll ? '正在应用...' : '应用到所有分镜'}
           </Button>
         </div>
       </div>
@@ -591,6 +700,32 @@ export function DirectorStyleEditor() {
               <li>分镜的AI绘画提示词生成</li>
               <li>分镜的AI视频提示词生成</li>
             </ul>
+          </div>
+
+          {/* 🆕 建议5：示例分镜提示词预览 */}
+          <div className="mt-4 p-4 bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-lg">
+            <p className="text-sm font-medium text-purple-900 mb-3">
+              📸 示例分镜提示词预览（基于当前风格）
+            </p>
+            <div className="bg-white rounded-md p-4 border">
+              <p className="text-xs text-gray-500 mb-2">示例场景：森林中奔跑的少年</p>
+              <p className="text-sm font-mono text-gray-700 leading-relaxed">
+                中景镜头，年轻少年在森林小径上奔跑
+                {style.artStyle && `，${style.artStyle}风格`}
+                {style.colorTone && `，${style.colorTone}`}
+                {style.lightingStyle && `，${style.lightingStyle}照明`}
+                {style.cameraStyle && `，${style.cameraStyle}镜头`}
+                {style.mood && `，${style.mood}的氛围`}
+                ，高质量渲染，分镜级别细节
+                {style.customPrompt && `，${style.customPrompt}`}
+              </p>
+            </div>
+            {style.negativePrompt && (
+              <div className="mt-3 bg-red-50 rounded-md p-3 border border-red-200">
+                <p className="text-xs text-red-600 mb-1">负面提示词：</p>
+                <p className="text-xs font-mono text-red-700">{style.negativePrompt}</p>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>

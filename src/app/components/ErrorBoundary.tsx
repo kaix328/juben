@@ -42,8 +42,8 @@ export class ErrorBoundary extends React.Component<Props, State> {
     };
 
     handleGoHome = () => {
-        // 使用原生导航返回首页
-        window.location.href = '/';
+        // 使用 hash 路径返回首页，兼容 HashRouter
+        window.location.href = window.location.pathname + '#/';
     };
 
     render() {
