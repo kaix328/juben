@@ -6662,8 +6662,8 @@ function DropdownMenuSeparator({
   );
 }
 const scriptRel = "modulepreload";
-const assetsURL = function(dep, importerUrl) {
-  return new URL(dep, importerUrl).href;
+const assetsURL = function(dep) {
+  return "/juben/" + dep;
 };
 const seen = {};
 const __vitePreload = function preload(baseModule, deps, importerUrl) {
@@ -6679,27 +6679,19 @@ const __vitePreload = function preload(baseModule, deps, importerUrl) {
         )
       );
     };
-    const links = document.getElementsByTagName("link");
+    document.getElementsByTagName("link");
     const cspNonceMeta = document.querySelector(
       "meta[property=csp-nonce]"
     );
     const cspNonce = (cspNonceMeta == null ? void 0 : cspNonceMeta.nonce) || (cspNonceMeta == null ? void 0 : cspNonceMeta.getAttribute("nonce"));
     promise = allSettled2(
       deps.map((dep) => {
-        dep = assetsURL(dep, importerUrl);
+        dep = assetsURL(dep);
         if (dep in seen) return;
         seen[dep] = true;
         const isCss = dep.endsWith(".css");
         const cssSelector = isCss ? '[rel="stylesheet"]' : "";
-        const isBaseRelative = !!importerUrl;
-        if (isBaseRelative) {
-          for (let i = links.length - 1; i >= 0; i--) {
-            const link2 = links[i];
-            if (link2.href === dep && (!isCss || link2.rel === "stylesheet")) {
-              return;
-            }
-          }
-        } else if (document.querySelector(`link[href="${dep}"]${cssSelector}`)) {
+        if (document.querySelector(`link[href="${dep}"]${cssSelector}`)) {
           return;
         }
         const link = document.createElement("link");
@@ -9829,14 +9821,14 @@ async function generateStoryboardImage(panel, characters, scenes, directorStyle,
   const { generateStoryboardImagePrompt: generateStoryboardImagePrompt2 } = await __vitePreload(async () => {
     const { generateStoryboardImagePrompt: generateStoryboardImagePrompt22 } = await Promise.resolve().then(() => promptGenerator);
     return { generateStoryboardImagePrompt: generateStoryboardImagePrompt22 };
-  }, true ? void 0 : void 0, import.meta.url);
+  }, true ? void 0 : void 0);
   let imagePrompt = generateStoryboardImagePrompt2(panel, characters, scenes, directorStyle);
   if (enableOptimization) {
     try {
       const { optimizePrompt: optimizePrompt2 } = await __vitePreload(async () => {
         const { optimizePrompt: optimizePrompt22 } = await Promise.resolve().then(() => volcApi);
         return { optimizePrompt: optimizePrompt22 };
-      }, true ? void 0 : void 0, import.meta.url);
+      }, true ? void 0 : void 0);
       imagePrompt = await optimizePrompt2(
         imagePrompt,
         (directorStyle == null ? void 0 : directorStyle.artStyle) || "Cinematic",
@@ -9849,11 +9841,11 @@ async function generateStoryboardImage(panel, characters, scenes, directorStyle,
   const { IMAGE_SIZES: IMAGE_SIZES2 } = await __vitePreload(async () => {
     const { IMAGE_SIZES: IMAGE_SIZES3 } = await Promise.resolve().then(() => imageSizes);
     return { IMAGE_SIZES: IMAGE_SIZES3 };
-  }, true ? void 0 : void 0, import.meta.url);
+  }, true ? void 0 : void 0);
   const { callDoubaoImage: callDoubaoImage2 } = await __vitePreload(async () => {
     const { callDoubaoImage: callDoubaoImage22 } = await Promise.resolve().then(() => volcApi);
     return { callDoubaoImage: callDoubaoImage22 };
-  }, true ? void 0 : void 0, import.meta.url);
+  }, true ? void 0 : void 0);
   let selectedSize = IMAGE_SIZES2.STORYBOARD;
   if (panel.aspectRatio) {
     const aspectSizeMap = {
@@ -15643,7 +15635,7 @@ function useStoryboardData({ chapterId }) {
     const { versionStorage: versionStorage2 } = await __vitePreload(async () => {
       const { versionStorage: versionStorage3 } = await Promise.resolve().then(() => storage);
       return { versionStorage: versionStorage3 };
-    }, true ? void 0 : void 0, import.meta.url);
+    }, true ? void 0 : void 0);
     const vData = await versionStorage2.getAll();
     setVersions(vData.filter((v) => v.chapterId === chapterId));
   }, [chapterId]);
@@ -15653,7 +15645,7 @@ function useStoryboardData({ chapterId }) {
       const { versionStorage: versionStorage2, generateId: generateId2 } = await __vitePreload(async () => {
         const { versionStorage: versionStorage3, generateId: generateId3 } = await Promise.resolve().then(() => storage);
         return { versionStorage: versionStorage3, generateId: generateId3 };
-      }, true ? void 0 : void 0, import.meta.url);
+      }, true ? void 0 : void 0);
       const version = {
         id: generateId2(),
         chapterId,
@@ -15674,7 +15666,7 @@ function useStoryboardData({ chapterId }) {
       const { versionStorage: versionStorage2 } = await __vitePreload(async () => {
         const { versionStorage: versionStorage3 } = await Promise.resolve().then(() => storage);
         return { versionStorage: versionStorage3 };
-      }, true ? void 0 : void 0, import.meta.url);
+      }, true ? void 0 : void 0);
       const version = await versionStorage2.getById(versionId);
       if (version && version.data) {
         await handleSave(version.data);
@@ -15689,7 +15681,7 @@ function useStoryboardData({ chapterId }) {
       const { versionStorage: versionStorage2 } = await __vitePreload(async () => {
         const { versionStorage: versionStorage3 } = await Promise.resolve().then(() => storage);
         return { versionStorage: versionStorage3 };
-      }, true ? void 0 : void 0, import.meta.url);
+      }, true ? void 0 : void 0);
       await versionStorage2.delete(versionId);
       await loadVersions();
       toast.success("版本记录已删除");
@@ -17368,7 +17360,7 @@ function useAssetData({ projectId }) {
           batchApplyStyleToProps: batchApplyStyleToProps3,
           batchApplyStyleToCostumes: batchApplyStyleToCostumes3
         };
-      }, true ? void 0 : void 0, import.meta.url);
+      }, true ? void 0 : void 0);
       const syncedAssets = {
         ...updatedAssetsPreSync,
         characters: batchApplyStyleToCharacters2(updatedAssetsPreSync.characters, project.directorStyle),
@@ -22584,7 +22576,7 @@ function App() {
   reactExports.useEffect(() => {
     initializeDemoData();
   }, []);
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs(BrowserRouter, { children: [
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs(BrowserRouter, { basename: "/juben", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx(Toaster, { position: "top-center", richColors: true }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(Routes, { children: /* @__PURE__ */ jsxRuntimeExports.jsxs(Route, { path: "/", element: /* @__PURE__ */ jsxRuntimeExports.jsx(Layout, {}), children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx(Route, { index: true, element: /* @__PURE__ */ jsxRuntimeExports.jsx(Bookshelf, {}) }),
