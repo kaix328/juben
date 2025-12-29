@@ -1141,9 +1141,9 @@ function Layout() {
     /* @__PURE__ */ jsxRuntimeExports.jsx("header", { className: "bg-white shadow-sm border-b sticky top-0 z-50", children: /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-full px-4 sm:px-6 lg:px-8", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex justify-between items-center h-16", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-4", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "a",
+          Link,
           {
-            href: getBackPath(),
+            to: getBackPath(),
             className: "p-2 hover:bg-gray-100 rounded-lg transition-colors inline-block",
             title: "返回",
             children: /* @__PURE__ */ jsxRuntimeExports.jsx(ArrowLeft, { className: "w-5 h-5 text-gray-600" })
@@ -4237,7 +4237,7 @@ class ErrorBoundary extends React.Component {
       window.location.reload();
     };
     this.handleGoHome = () => {
-      window.location.href = "/";
+      window.location.href = window.location.pathname + "#/";
     };
     this.state = { hasError: false };
   }
