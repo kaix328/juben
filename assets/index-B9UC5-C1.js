@@ -7044,7 +7044,19 @@ async function callDoubaoImage(prompt, size = "1920x1920", negativePrompt) {
   });
   return data.data[0].url;
 }
-async function optimizePrompt(description, style = "Cinematic", resourceType) {
+function buildStyleDescription(style) {
+  if (!style) return "Cinematic";
+  const parts = [];
+  if (style.artStyle) parts.push(style.artStyle);
+  if (style.colorTone) parts.push(style.colorTone);
+  if (style.lightingStyle) parts.push(style.lightingStyle);
+  if (style.cameraStyle) parts.push(style.cameraStyle);
+  if (style.mood) parts.push(`${style.mood}氛围`);
+  if (style.customPrompt) parts.push(style.customPrompt);
+  return parts.length > 0 ? parts.join(", ") : "Cinematic";
+}
+async function optimizePrompt(description, styleOrString = "Cinematic", resourceType) {
+  const style = typeof styleOrString === "string" ? styleOrString : buildStyleDescription(styleOrString);
   let systemPrompt = "";
   if (resourceType === "character") {
     systemPrompt = `你是专业的AI绘画提示词专家,专注于角色设计。
@@ -16217,12 +16229,11 @@ function useStoryboardActions({
     const tasks = storyboard.panels.filter((p) => selectedIds.has(p.id)).map((panel) => ({
       id: panel.id,
       execute: async () => {
-        var _a;
         let finalPrompt = panel.aiPrompt;
         if (optimize) {
           finalPrompt = await optimizePrompt(
             panel.description,
-            ((_a = project.directorStyle) == null ? void 0 : _a.artStyle) || "Cinematic",
+            project.directorStyle || "Cinematic",
             "storyboard"
           );
         }
@@ -16250,6 +16261,17 @@ function useStoryboardActions({
       onComplete == null ? void 0 : onComplete();
     }
   }, [storyboard, project, onUpdateStoryboard, queue]);
+  const computeStyleHash = reactExports.useCallback((style) => {
+    if (!style) return "default";
+    const str = JSON.stringify(style);
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i);
+      hash = (hash << 5) - hash + char;
+      hash = hash & hash;
+    }
+    return `style_${Math.abs(hash).toString(16).substring(0, 8)}`;
+  }, []);
   const handleGenerateImage = reactExports.useCallback(async (panel) => {
     if (!assets || !project || !storyboard) return;
     toast.loading("正在生成预览图...", { id: `img-${panel.id}` });
@@ -16262,8 +16284,16 @@ function useStoryboardActions({
         true
         // enableOptimization
       );
+      const styleHash = computeStyleHash(project.directorStyle);
       const updatedPanels = storyboard.panels.map(
-        (p) => p.id === panel.id ? { ...p, generatedImage: imageUrl } : p
+        (p) => p.id === panel.id ? {
+          ...p,
+          generatedImage: imageUrl,
+          appliedStyleHash: styleHash,
+          // 🆕 记录风格哈希
+          generatedAt: (/* @__PURE__ */ new Date()).toISOString()
+          // 🆕 记录生成时间
+        } : p
       );
       await onUpdateStoryboard({ ...storyboard, panels: updatedPanels });
       toast.success("预览图已生成", { id: `img-${panel.id}` });
@@ -16272,7 +16302,7 @@ function useStoryboardActions({
       console.error("Failed to generate image:", error);
       toast.error("生成图片失败", { id: `img-${panel.id}` });
     }
-  }, [assets, project, storyboard, onUpdateStoryboard]);
+  }, [assets, project, storyboard, onUpdateStoryboard, computeStyleHash]);
   const handleCopyPanel = reactExports.useCallback(async (panel) => {
     if (!storyboard) return;
     const newPanel = {
@@ -22096,6 +22126,79 @@ function DirectorStyleEditor() {
       safeToast(`已应用 ${presetName}`);
     }
   };
+  const [isApplyingToAll, setIsApplyingToAll] = reactExports.useState(false);
+  const handleApplyStyleToAllPanels = reactExports.useCallback(async () => {
+    if (!currentProject || !projectId || !isMountedRef.current) return;
+    await handleSave();
+    const confirmed = window.confirm(
+      "确定要将当前导演风格应用到项目中所有分镜的提示词吗？\n\n这将为每个分镜重新生成优化后的AI提示词，可能需要一些时间。"
+    );
+    if (!confirmed) return;
+    setIsApplyingToAll(true);
+    const toastId = "apply-style-to-all";
+    toast.loading("正在加载项目分镜...", { id: toastId });
+    try {
+      const chapters = await chapterStorage.getByProjectId(projectId);
+      if (!chapters || chapters.length === 0) {
+        toast.warning("项目中没有章节", { id: toastId });
+        setIsApplyingToAll(false);
+        return;
+      }
+      let totalPanels = 0;
+      let processedPanels = 0;
+      const storyboards = [];
+      for (const chapter of chapters) {
+        const sb = await storyboardStorage.getByChapterId(chapter.id);
+        if (sb && sb.panels && sb.panels.length > 0) {
+          storyboards.push(sb);
+          totalPanels += sb.panels.length;
+        }
+      }
+      if (totalPanels === 0) {
+        toast.warning("项目中没有分镜面板", { id: toastId });
+        setIsApplyingToAll(false);
+        return;
+      }
+      toast.loading(`正在更新 ${totalPanels} 个分镜的提示词...`, { id: toastId });
+      for (const storyboard of storyboards) {
+        const updatedPanels = await Promise.all(
+          storyboard.panels.map(async (panel) => {
+            try {
+              const newPrompt = await optimizePrompt(
+                panel.description || "",
+                style,
+                // 传递完整的导演风格对象
+                "storyboard"
+              );
+              processedPanels++;
+              toast.loading(`已处理 ${processedPanels}/${totalPanels} 个分镜...`, { id: toastId });
+              return {
+                ...panel,
+                aiPrompt: newPrompt,
+                appliedStyleHash: `style_${Date.now().toString(16).substring(0, 8)}`,
+                generatedAt: (/* @__PURE__ */ new Date()).toISOString()
+              };
+            } catch (error) {
+              console.error(`Failed to update panel ${panel.id}:`, error);
+              processedPanels++;
+              return panel;
+            }
+          })
+        );
+        await storyboardStorage.save({
+          ...storyboard,
+          panels: updatedPanels,
+          updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+        });
+      }
+      toast.success(`已成功更新 ${processedPanels} 个分镜的提示词！`, { id: toastId });
+    } catch (error) {
+      console.error("Failed to apply style to all panels:", error);
+      toast.error("应用风格时出错，请稍后重试", { id: toastId });
+    } finally {
+      setIsApplyingToAll(false);
+    }
+  }, [currentProject, projectId, style, handleSave]);
   if (!currentProject) {
     return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex items-center justify-center h-64", children: /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-gray-500", children: "加载项目配置中..." }) });
   }
@@ -22145,7 +22248,20 @@ function DirectorStyleEditor() {
         /* @__PURE__ */ jsxRuntimeExports.jsxs(Button, { onClick: handleSave, className: "gap-2", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx(Save, { className: "w-4 h-4" }),
           "保存风格"
-        ] })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          Button,
+          {
+            variant: "secondary",
+            onClick: handleApplyStyleToAllPanels,
+            disabled: isApplyingToAll,
+            className: "gap-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600",
+            children: [
+              isApplyingToAll ? /* @__PURE__ */ jsxRuntimeExports.jsx(RefreshCw, { className: "w-4 h-4 animate-spin" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(Layers, { className: "w-4 h-4" }),
+              isApplyingToAll ? "正在应用..." : "应用到所有分镜"
+            ]
+          }
+        )
       ] })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs(Card, { className: "bg-gradient-to-r from-purple-50 to-pink-50 border-purple-200", children: [
@@ -22420,6 +22536,26 @@ function DirectorStyleEditor() {
             /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "项目库中的场景AI提示词生成" }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "分镜的AI绘画提示词生成" }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "分镜的AI视频提示词生成" })
+          ] })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-4 p-4 bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-lg", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-medium text-purple-900 mb-3", children: "📸 示例分镜提示词预览（基于当前风格）" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white rounded-md p-4 border", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-gray-500 mb-2", children: "示例场景：森林中奔跑的少年" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-sm font-mono text-gray-700 leading-relaxed", children: [
+              "中景镜头，年轻少年在森林小径上奔跑",
+              style.artStyle && `，${style.artStyle}风格`,
+              style.colorTone && `，${style.colorTone}`,
+              style.lightingStyle && `，${style.lightingStyle}照明`,
+              style.cameraStyle && `，${style.cameraStyle}镜头`,
+              style.mood && `，${style.mood}的氛围`,
+              "，高质量渲染，分镜级别细节",
+              style.customPrompt && `，${style.customPrompt}`
+            ] })
+          ] }),
+          style.negativePrompt && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-3 bg-red-50 rounded-md p-3 border border-red-200", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-red-600 mb-1", children: "负面提示词：" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs font-mono text-red-700", children: style.negativePrompt })
           ] })
         ] })
       ] })
