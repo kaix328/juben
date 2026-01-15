@@ -6357,7 +6357,7 @@ function ProjectDetail() {
         /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-gray-900 mb-2 text-2xl font-bold", children: project.title }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-gray-600", children: project.description })
       ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-2", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap gap-2", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(Link, { to: `/projects/${projectId}/dashboard`, children: /* @__PURE__ */ jsxRuntimeExports.jsxs(Button, { variant: "outline", className: "gap-2", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx(ChartColumn, { className: "w-4 h-4" }),
           "数据统计"
@@ -6431,7 +6431,7 @@ function ProjectDetail() {
               /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "text-gray-900 font-medium", children: chapter.title }),
               /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex items-center gap-2", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-gray-500 text-sm", children: chapter.originalText ? `${chapter.originalText.length} 字` : "未编辑" }) })
             ] }),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-3 gap-3", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-1 sm:grid-cols-3 gap-3", children: [
               /* @__PURE__ */ jsxRuntimeExports.jsx(Link, { to: `/projects/${projectId}/chapter/${chapter.id}`, children: /* @__PURE__ */ jsxRuntimeExports.jsxs(Button, { variant: "outline", size: "sm", className: "w-full gap-2 hover:border-purple-300 hover:bg-purple-50 hover:text-purple-700", children: [
                 /* @__PURE__ */ jsxRuntimeExports.jsx(FileText, { className: "w-4 h-4" }),
                 "原文编辑"
@@ -22410,15 +22410,15 @@ function PageHeader({
   onApplyToAll,
   isApplyingToAll
 }) {
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between", children: [
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col md:flex-row md:items-center justify-between gap-4", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("h1", { className: "text-3xl font-bold text-gray-900 flex items-center gap-3", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("h1", { className: "text-2xl md:text-3xl font-bold text-gray-900 flex items-center gap-3", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(Palette, { className: "w-8 h-8" }),
         "导演风格设定"
       ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-gray-600 mt-1", children: "为整个项目设定统一的视觉风格，将自动应用到所有AI提示词" })
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-gray-600 mt-1 text-sm md:text-base", children: "为整个项目设定统一的视觉风格，将自动应用到所有AI提示词" })
     ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-2", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap gap-2", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs(Button, { variant: "outline", onClick: onReset, className: "gap-2", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(RotateCcw, { className: "w-4 h-4" }),
         "重置"

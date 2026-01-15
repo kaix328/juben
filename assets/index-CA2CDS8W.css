@@ -5369,6 +5369,24 @@
       grid-template-columns: repeat(5, minmax(0, 1fr));
     }
 
+    .md\:flex-row {
+      flex-direction: row;
+    }
+
+    .md\:items-center {
+      align-items: center;
+    }
+
+    .md\:text-3xl {
+      font-size: var(--text-3xl);
+      line-height: var(--tw-leading, var(--text-3xl--line-height));
+    }
+
+    .md\:text-base {
+      font-size: var(--text-base);
+      line-height: var(--tw-leading, var(--text-base--line-height));
+    }
+
     .md\:text-sm {
       font-size: var(--text-sm);
       line-height: var(--tw-leading, var(--text-sm--line-height));
