@@ -6661,80 +6661,28 @@ function DropdownMenuSeparator({
     }
   );
 }
-const scriptRel = "modulepreload";
-const assetsURL = function(dep) {
-  return "/juben/" + dep;
+const devLog = (...args) => {
 };
-const seen = {};
-const __vitePreload = function preload(baseModule, deps, importerUrl) {
-  let promise = Promise.resolve();
-  if (deps && deps.length > 0) {
-    let allSettled2 = function(promises) {
-      return Promise.all(
-        promises.map(
-          (p) => Promise.resolve(p).then(
-            (value) => ({ status: "fulfilled", value }),
-            (reason) => ({ status: "rejected", reason })
-          )
-        )
-      );
-    };
-    document.getElementsByTagName("link");
-    const cspNonceMeta = document.querySelector(
-      "meta[property=csp-nonce]"
-    );
-    const cspNonce = (cspNonceMeta == null ? void 0 : cspNonceMeta.nonce) || (cspNonceMeta == null ? void 0 : cspNonceMeta.getAttribute("nonce"));
-    promise = allSettled2(
-      deps.map((dep) => {
-        dep = assetsURL(dep);
-        if (dep in seen) return;
-        seen[dep] = true;
-        const isCss = dep.endsWith(".css");
-        const cssSelector = isCss ? '[rel="stylesheet"]' : "";
-        if (document.querySelector(`link[href="${dep}"]${cssSelector}`)) {
-          return;
-        }
-        const link = document.createElement("link");
-        link.rel = isCss ? "stylesheet" : scriptRel;
-        if (!isCss) {
-          link.as = "script";
-        }
-        link.crossOrigin = "";
-        link.href = dep;
-        if (cspNonce) {
-          link.setAttribute("nonce", cspNonce);
-        }
-        document.head.appendChild(link);
-        if (isCss) {
-          return new Promise((res, rej) => {
-            link.addEventListener("load", res);
-            link.addEventListener(
-              "error",
-              () => rej(new Error(`Unable to preload CSS for ${dep}`))
-            );
-          });
-        }
-      })
-    );
-  }
-  function handlePreloadError(err) {
-    const e = new Event("vite:preloadError", {
-      cancelable: true
-    });
-    e.payload = err;
-    window.dispatchEvent(e);
-    if (!e.defaultPrevented) {
-      throw err;
+async function callWithRetry(fn, maxRetries = 3, baseDelay = 1e3) {
+  let lastError = null;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastError = e;
+      console.warn(`[重试机制] 第 ${i + 1} 次调用失败，${i < maxRetries - 1 ? `${baseDelay * Math.pow(2, i)}ms 后重试` : "已达最大重试次数"}`);
+      if (i < maxRetries - 1) {
+        await new Promise((resolve) => setTimeout(resolve, baseDelay * Math.pow(2, i)));
+      }
     }
   }
-  return promise.then((res) => {
-    for (const item of res || []) {
-      if (item.status !== "rejected") continue;
-      handlePreloadError(item.reason);
-    }
-    return baseModule().catch(handlePreloadError);
-  });
-};
+  throw lastError || new Error("未知错误");
+}
+function checkCharacterConsistency(panelCharacters, assetCharacters) {
+  if (!panelCharacters || panelCharacters.length === 0) return [];
+  const knownNames = new Set(assetCharacters.map((c) => c.name));
+  return panelCharacters.filter((name) => !knownNames.has(name));
+}
 function createJSONStorage(getStorage, options) {
   let storage2;
   try {
@@ -6937,6 +6885,127 @@ const useConfigStore = create()(
     }
   )
 );
+function sanitizeJsonText(text) {
+  return text.replace(/[\u201c\u201d]/g, '"').replace(/[\u2018\u2019]/g, "'").replace(/，/g, ",").replace(/：/g, ":").replace(/\n\s*\/\/[^\n]*/g, "").replace(/,(\s*[}\]])/g, "$1").replace(/"\s*\n\s*"/g, '", "').replace(/}\s*\n\s*{/g, "},{").replace(/]\s*\n\s*\[/g, "],[");
+}
+function fixJsonSyntax(json) {
+  return json.replace(/""(\s*[\}\]])/g, '"$1').replace(/,\s*,/g, ",").replace(/([\{\[,]\s*)(\w+)(\s*:)/g, '$1"$2"$3').replace(/[\x00-\x1F\x7F]/g, " ").replace(/([^\\])\\n/g, "$1\\\\n");
+}
+function extractFromMarkdown(text) {
+  const match = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (match) {
+    try {
+      const cleaned = fixJsonSyntax(match[1]);
+      return JSON.parse(cleaned);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+function extractObjects(text) {
+  const objectMatches = text.match(/\{[^{}]*\}/g);
+  if (!objectMatches || objectMatches.length === 0) return null;
+  const validObjects = [];
+  for (const objStr of objectMatches) {
+    try {
+      const obj = JSON.parse(fixJsonSyntax(objStr));
+      if (obj && typeof obj === "object") {
+        validObjects.push(obj);
+      }
+    } catch {
+    }
+  }
+  return validObjects.length > 0 ? validObjects : null;
+}
+function extractByKeyPatterns(text) {
+  const keyPatterns = ['"characters"', '"scenes"', '"props"', '"costumes"'];
+  for (const key of keyPatterns) {
+    const keyIndex = text.indexOf(key);
+    if (keyIndex === -1) continue;
+    const startBrace = text.lastIndexOf("{", keyIndex);
+    if (startBrace === -1) continue;
+    let braceCount = 0;
+    let endBrace = -1;
+    for (let i = startBrace; i < text.length; i++) {
+      if (text[i] === "{") braceCount++;
+      else if (text[i] === "}") {
+        braceCount--;
+        if (braceCount === 0) {
+          endBrace = i;
+          break;
+        }
+      }
+    }
+    if (endBrace !== -1) {
+      try {
+        const potentialJson = text.substring(startBrace, endBrace + 1);
+        return JSON.parse(fixJsonSyntax(potentialJson));
+      } catch {
+      }
+    }
+  }
+  return null;
+}
+function extractArray(text) {
+  const arrayMatch = text.match(/\[[\s\S]*?\](?=\s*$|\s*[^\[\{])/);
+  if (!arrayMatch) return null;
+  try {
+    let cleanJson = fixJsonSyntax(arrayMatch[0]);
+    const openBrackets = (cleanJson.match(/\[/g) || []).length;
+    const closeBrackets = (cleanJson.match(/\]/g) || []).length;
+    if (openBrackets > closeBrackets) {
+      cleanJson += "]".repeat(openBrackets - closeBrackets);
+    }
+    return JSON.parse(cleanJson);
+  } catch {
+    return null;
+  }
+}
+function extractObject(text) {
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) return null;
+  let jsonStr = match[0];
+  try {
+    return JSON.parse(fixJsonSyntax(jsonStr));
+  } catch {
+    while (jsonStr.length > 2) {
+      jsonStr = jsonStr.slice(0, -1);
+      if (jsonStr.endsWith("}")) {
+        try {
+          return JSON.parse(fixJsonSyntax(jsonStr));
+        } catch {
+          continue;
+        }
+      }
+    }
+  }
+  return null;
+}
+function parseJSON(text) {
+  const cleanText = sanitizeJsonText(text);
+  try {
+    return JSON.parse(fixJsonSyntax(cleanText));
+  } catch {
+    console.log("[parseJSON] 直接解析失败，尝试其他策略...");
+  }
+  const fromMarkdown = extractFromMarkdown(text);
+  if (fromMarkdown) return fromMarkdown;
+  const objects = extractObjects(cleanText);
+  if (objects) {
+    console.log(`[parseJSON] 逐对象解析成功，提取了 ${objects.length} 个对象`);
+    return objects;
+  }
+  const byKey = extractByKeyPatterns(text);
+  if (byKey) return byKey;
+  const array = extractArray(cleanText);
+  if (array) return array;
+  const object = extractObject(cleanText);
+  if (object) return object;
+  console.error("parseJSON failed, raw text:", text.substring(0, 500));
+  console.warn("[parseJSON] 所有解析策略失败，返回空数组");
+  return [];
+}
 function getSettings() {
   const state = useConfigStore.getState();
   const settings = state.apiSettings;
@@ -7153,133 +7222,132 @@ async function optimizePrompt(description, styleOrString = "Cinematic", resource
     { role: "user", content: description }
   ], 0.3);
 }
-function parseJSON(text) {
-  let cleanText = text.replace(/[\u201c\u201d]/g, '"').replace(/[\u2018\u2019]/g, "'").replace(/，/g, ",").replace(/：/g, ":").replace(/\n\s*\/\/[^\n]*/g, "").replace(/,(\s*[}\]])/g, "$1").replace(/"\s*\n\s*"/g, '", "').replace(/}\s*\n\s*{/g, "},{").replace(/]\s*\n\s*\[/g, "],[");
-  const fixJsonSyntax = (json) => {
-    return json.replace(/""(\s*[\}\]])/g, '"$1').replace(/,\s*,/g, ",").replace(/([{\[,]\s*)(\w+)(\s*:)/g, '$1"$2"$3').replace(/[\x00-\x1F\x7F]/g, " ").replace(/([^\\])\\n/g, "$1\\\\n");
-  };
-  cleanText = fixJsonSyntax(cleanText);
+const MODE_DESCRIPTIONS = {
+  movie: "电影剧本，标准三幕或四幕结构，场景较长，注重视觉叙事",
+  tv_drama: "电视剧剧本，每集约45分钟，有明确的集数划分和幕间高潮",
+  short_video: "短视频剧本，3分钟以内，节奏快，开场即高潮",
+  web_series: "网络剧剧本，每集10-20分钟，注重悬念和钩子"
+};
+async function extractScript(originalText, mode = "tv_drama", directorStyle) {
+  const modeDesc = MODE_DESCRIPTIONS[mode];
+  let styleHint = "";
+  if (directorStyle) {
+    const hints = [];
+    if (directorStyle.artStyle) {
+      if (directorStyle.artStyle.includes("赛博") || directorStyle.artStyle.includes("科幻")) {
+        hints.push("对白风格：简洁干练，带有科技感和未来感");
+      } else if (directorStyle.artStyle.includes("港片") || directorStyle.artStyle.includes("复古")) {
+        hints.push("对白风格：干脆利落，经典港片风格，可适当使用经典台词结构");
+      } else if (directorStyle.artStyle.includes("日系") || directorStyle.artStyle.includes("动画")) {
+        hints.push("对白风格：情感细腻，可适当使用内心独白强化情感");
+      }
+    }
+    if (directorStyle.mood) {
+      hints.push(`整体氛围：${directorStyle.mood}`);
+    }
+    if (hints.length > 0) {
+      styleHint = `
+
+【导演风格提示】
+${hints.join("\n")}`;
+    }
+  }
+  const prompt = `你是一位拥有20年经验的专业编剧。请将以下文本改编为标准影视剧本格式。
+
+【剧本类型】${modeDesc}${styleHint}
+
+【输出规范】
+1. 场景行格式：场景号. 内/外景. 地点 - 时间
+2. 动作描述：现在时态，第三人称，简洁有力，视觉化表达
+3. 角色首次出场：标记 isFirstAppearance=true，并提供简短外貌描述
+4. 对白标记：
+   - V.O. = 画外音（角色在画外说话）
+   - O.S. = 场外音（角色在场景中但不在画面内）
+   - CONT'D = 延续对白（同一角色连续说话被动作打断后继续）
+5. 括号指示：仅用于必要的表演提示，如"（轻声地）"、"（怒视）"
+
+【专业技巧】
+- 每个场景应有明确的戏剧目的（推进剧情/揭示角色/制造冲突）
+- 删除冗余的叙述性语言，只保留可视化内容
+- 对白应自然、口语化，符合角色性格
+- 适当添加转场指示（切至、淡出、溶至等）
+- 估算每个场景的时长（秒）
+
+【特殊场景类型】
+- FLASHBACK: 闪回
+- MONTAGE: 蒙太奇
+- INSERT: 插入镜头
+- INTERCUT: 交叉剪辑
+
+请严格按照以下 JSON 格式返回，不要包含 Markdown 格式标记：
+[
+  {
+    "sceneNumber": 1,
+    "episodeNumber": 1,
+    "location": "场景地点",
+    "subLocation": "子场景（可选）",
+    "timeOfDay": "白天/夜晚/黄昏/清晨",
+    "sceneType": "INT/EXT",
+    "continuity": "CONTINUOUS/LATER/SAME（可选）",
+    "specialSceneType": "FLASHBACK/MONTAGE/INSERT（可选）",
+    "action": "动作描述，现在时态，视觉化表达",
+    "beat": "情绪节拍（可选，如：紧张升级、情感爆发）",
+    "transition": "切至/淡出/溶至（可选）",
+    "estimatedDuration": 30,
+    "characters": ["角色A", "角色B"],
+    "dialogues": [
+      {
+        "character": "角色A",
+        "extension": "V.O./O.S.（可选）",
+        "parenthetical": "表演提示（可选）",
+        "lines": "台词内容",
+        "isFirstAppearance": true/false,
+        "isContinued": false
+      }
+    ],
+    "notes": "编剧备注（可选）"
+  }
+]
+
+文本内容：
+${originalText.substring(0, 15e3)}
+`;
   try {
-    return JSON.parse(cleanText);
-  } catch (e) {
-    console.log("[parseJSON] 直接解析失败，尝试其他策略...");
-    const match = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-    if (match) {
-      try {
-        const cleaned = fixJsonSyntax(match[1]);
-        return JSON.parse(cleaned);
-      } catch (e2) {
-        console.error("Failed to parse inner JSON", e2);
-      }
-    }
-    const objectMatches = cleanText.match(/\{[^{}]*\}/g);
-    if (objectMatches && objectMatches.length > 0) {
-      const validObjects = [];
-      for (const objStr of objectMatches) {
-        try {
-          const obj = JSON.parse(fixJsonSyntax(objStr));
-          if (obj && typeof obj === "object") {
-            validObjects.push(obj);
-          }
-        } catch {
-        }
-      }
-      if (validObjects.length > 0) {
-        console.log(`[parseJSON] 逐对象解析成功，提取了 ${validObjects.length} 个对象`);
-        return validObjects;
-      }
-    }
-    const arrayMatch = text.match(/\[[\s\S]*?\](?=\s*$|\s*[^\[\{])/);
-    if (arrayMatch) {
-      try {
-        let cleanJson = fixJsonSyntax(arrayMatch[0]);
-        const openBrackets = (cleanJson.match(/\[/g) || []).length;
-        const closeBrackets = (cleanJson.match(/\]/g) || []).length;
-        if (openBrackets > closeBrackets) {
-          cleanJson += "]".repeat(openBrackets - closeBrackets);
-        }
-        return JSON.parse(cleanJson);
-      } catch (e3) {
-        console.error("Failed to parse cleaned array", e3);
-      }
-    }
-    const keyPatterns = ['"characters"', '"scenes"', '"props"', '"costumes"'];
-    for (const key of keyPatterns) {
-      const keyIndex = text.indexOf(key);
-      if (keyIndex !== -1) {
-        const startBrace = text.lastIndexOf("{", keyIndex);
-        if (startBrace !== -1) {
-          let braceCount = 0;
-          let endBrace = -1;
-          for (let i = startBrace; i < text.length; i++) {
-            if (text[i] === "{") braceCount++;
-            else if (text[i] === "}") {
-              braceCount--;
-              if (braceCount === 0) {
-                endBrace = i;
-                break;
-              }
-            }
-          }
-          if (endBrace !== -1) {
-            try {
-              const potentialJson = text.substring(startBrace, endBrace + 1);
-              return JSON.parse(fixJsonSyntax(potentialJson));
-            } catch (e2) {
-            }
-          }
-        }
-      }
-    }
-    const match2 = text.match(/\{[\s\S]*\}/);
-    if (match2) {
-      try {
-        return JSON.parse(fixJsonSyntax(match2[0]));
-      } catch (e4) {
-        let jsonStr = match2[0];
-        while (jsonStr.length > 2) {
-          try {
-            return JSON.parse(fixJsonSyntax(jsonStr));
-          } catch {
-            jsonStr = jsonStr.slice(0, -1);
-            if (jsonStr.endsWith("}")) {
-              try {
-                return JSON.parse(fixJsonSyntax(jsonStr));
-              } catch {
-                continue;
-              }
-            }
-          }
-        }
-      }
-    }
-    const match3 = text.match(/\[[\s\S]*\]/);
-    if (match3) {
-      try {
-        return JSON.parse(fixJsonSyntax(match3[0]));
-      } catch (e5) {
-        let jsonStr = match3[0];
-        jsonStr = jsonStr.replace(/,\s*\]/g, "]");
-        jsonStr = jsonStr.replace(/,\s*\}/g, "}");
-        try {
-          return JSON.parse(fixJsonSyntax(jsonStr));
-        } catch {
-          console.error("Failed even after cleanup");
-        }
-      }
-    }
-    console.error("parseJSON failed, raw text:", text.substring(0, 500));
-    console.warn("[parseJSON] 所有解析策略失败，返回空数组");
-    return [];
+    const result = await callDeepSeek([{ role: "user", content: prompt }]);
+    const scenes = parseJSON(result);
+    return scenes.map((s, index) => ({
+      id: generateId(),
+      sceneNumber: s.sceneNumber || index + 1,
+      episodeNumber: s.episodeNumber || 1,
+      location: s.location || "未知场景",
+      subLocation: s.subLocation,
+      timeOfDay: s.timeOfDay || "白天",
+      sceneType: s.sceneType || "INT",
+      continuity: s.continuity,
+      specialSceneType: s.specialSceneType,
+      dayNightNumber: s.dayNightNumber,
+      characters: s.characters || [],
+      action: s.action || "",
+      beat: s.beat,
+      dialogues: (s.dialogues || []).map((d) => ({
+        id: generateId(),
+        character: d.character,
+        extension: d.extension,
+        parenthetical: d.parenthetical,
+        lines: d.lines,
+        isFirstAppearance: d.isFirstAppearance || false,
+        isContinued: d.isContinued || false,
+        dual: d.dual
+      })),
+      transition: s.transition,
+      estimatedDuration: s.estimatedDuration || 15,
+      notes: s.notes
+    }));
+  } catch (error) {
+    console.error("DeepSeek extractScript failed:", error);
+    throw new Error("AI 剧本生成失败，请检查网络或 Key");
   }
 }
-const volcApi = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
-  __proto__: null,
-  callDeepSeek,
-  callDoubaoImage,
-  optimizePrompt,
-  parseJSON
-}, Symbol.toStringTag, { value: "Module" }));
 const SOUND_PRESETS = {
   // === 战斗/动作 ===
   "战斗": ["刀剑交击", "铠甲碰撞声", "战吼声", "拳拳到肉", "骨骼碎裂"],
@@ -7350,9 +7418,327 @@ const TIME_CONTROL_PRESETS = {
   "快速摇摆": "以极快的速度水平转动摄影机，导致画面瞬间模糊，常用于场景的快速切换或转场技巧",
   "焦距变换": "利用镜头焦距的调整，实现画面从远距离景物迅速过渡到近距离特写，或由特写迅速转为远景"
 };
+const DIRECTOR_STYLE_PRESETS = {
+  // ========== 经典日系动画 ==========
+  "宫崎骏风格": {
+    artStyle: "手绘动画",
+    colorTone: "温暖柔和色调",
+    lightingStyle: "自然柔和光线",
+    cameraStyle: "电影级镜头",
+    mood: "温馨治愈",
+    customPrompt: "Studio Ghibli style, hand-drawn animation, watercolor aesthetic, nature elements",
+    negativePrompt: "写实风格, 3D渲染, 暗黑恐怖, 血腥暴力",
+    aspectRatio: "16:9",
+    videoFrameRate: "24",
+    motionIntensity: "subtle"
+  },
+  "新海诚风格": {
+    artStyle: "唯美写实",
+    colorTone: "高饱和度鲜艳色彩",
+    lightingStyle: "戏剧性光影对比",
+    cameraStyle: "广角镜头",
+    mood: "浪漫忧郁",
+    customPrompt: "Makoto Shinkai style, detailed urban scenery, beautiful sky, lens flare, romantic atmosphere",
+    negativePrompt: "卡通Q版, 粗糙线条, 暗沉色调",
+    aspectRatio: "16:9",
+    videoFrameRate: "24",
+    motionIntensity: "normal"
+  },
+  "今敏风格": {
+    artStyle: "写实动画",
+    colorTone: "高饱和度",
+    lightingStyle: "戏剧性光影",
+    cameraStyle: "快速剪辑",
+    mood: "梦幻迷离",
+    customPrompt: "Satoshi Kon style, surreal transitions, dream-like, psychological thriller, anime realism, seamless reality shifts",
+    negativePrompt: "简单卡通, 低细节, 平淡叙事",
+    aspectRatio: "16:9",
+    videoFrameRate: "24",
+    motionIntensity: "dynamic"
+  },
+  // ========== 西方经典导演 ==========
+  "诺兰风格": {
+    artStyle: "写实主义",
+    colorTone: "冷色调去饱和",
+    lightingStyle: "强对比戏剧光",
+    cameraStyle: "史诗级IMAX镜头",
+    mood: "紧张悬疑",
+    customPrompt: "Christopher Nolan style, realistic, IMAX cinematography, wide angle, dramatic lighting",
+    negativePrompt: "卡通风格, 鲜艳色彩, 可爱元素",
+    aspectRatio: "21:9",
+    videoFrameRate: "24",
+    motionIntensity: "dynamic"
+  },
+  "昆汀风格": {
+    artStyle: "复古胶片",
+    colorTone: "鲜艳高饱和色彩",
+    lightingStyle: "强烈对比光线",
+    cameraStyle: "特写广角交替",
+    mood: "暴力美学",
+    customPrompt: "Quentin Tarantino style, retro film grain, vibrant colors, extreme close-ups, stylized violence",
+    negativePrompt: "温馨可爱, 柔和色调, 儿童向",
+    aspectRatio: "16:9",
+    videoFrameRate: "24",
+    motionIntensity: "dynamic"
+  },
+  "王家卫风格": {
+    artStyle: "写实主义",
+    colorTone: "温暖复古",
+    lightingStyle: "霓虹灯光",
+    cameraStyle: "手持摄影",
+    mood: "孤独浪漫",
+    customPrompt: "Wong Kar-wai style, neon lights, handheld camera, nostalgic mood, motion blur, slow motion, urban melancholy",
+    negativePrompt: "明亮温馨, 快节奏, 喜剧风格",
+    aspectRatio: "16:9",
+    videoFrameRate: "24",
+    motionIntensity: "subtle"
+  },
+  "韦斯·安德森风格": {
+    artStyle: "对称构图",
+    colorTone: "柔和复古色调",
+    lightingStyle: "均匀平面照明",
+    cameraStyle: "正面对称镜头",
+    mood: "奇幻怀旧",
+    customPrompt: "Wes Anderson style, symmetrical composition, pastel colors, whimsical, vintage aesthetic, centered framing",
+    negativePrompt: "不对称, 混乱构图, 暗黑风格",
+    aspectRatio: "16:9",
+    videoFrameRate: "24",
+    motionIntensity: "subtle"
+  },
+  "吉尔莫·德尔·托罗风格": {
+    artStyle: "哥特式奇幻",
+    colorTone: "冷色调",
+    lightingStyle: "阴影对比",
+    cameraStyle: "戏剧性构图",
+    mood: "神秘阴郁",
+    customPrompt: "Guillermo del Toro style, gothic fantasy, creature design, dark fairy tale, ornate details, magical realism",
+    negativePrompt: "明亮温馨, 简约风格, 卡通可爱",
+    aspectRatio: "16:9",
+    videoFrameRate: "24",
+    motionIntensity: "normal"
+  },
+  // ========== 视觉风格 ==========
+  "赛博朋克": {
+    artStyle: "赛博朋克",
+    colorTone: "霓虹色彩",
+    lightingStyle: "霓虹灯光效",
+    cameraStyle: "未来科技镜头",
+    mood: "神秘科技",
+    customPrompt: "cyberpunk style, neon lights, futuristic city, holographic elements, rain and reflections",
+    negativePrompt: "自然田园, 古典风格, 暖色调",
+    aspectRatio: "21:9",
+    videoFrameRate: "30",
+    motionIntensity: "dynamic"
+  },
+  "黑色电影": {
+    artStyle: "黑白胶片",
+    colorTone: "黑白高对比",
+    lightingStyle: "强烈阴影",
+    cameraStyle: "经典胶片镜头",
+    mood: "阴郁悬疑",
+    customPrompt: "film noir style, black and white, dramatic shadows, venetian blinds lighting, mystery atmosphere",
+    negativePrompt: "彩色画面, 明亮温馨, 可爱卡通",
+    aspectRatio: "16:9",
+    videoFrameRate: "24",
+    motionIntensity: "subtle"
+  },
+  // ========== AI漫剧爆款风格 ==========
+  "古风仙侠": {
+    artStyle: "国风水墨",
+    colorTone: "青绿山水色调",
+    lightingStyle: "柔和仙气光",
+    cameraStyle: "飘逸镜头",
+    mood: "仙气飘飘",
+    customPrompt: "中国古典仙侠, 水墨画风格, 云雾缭绕, 仙鹤飞舞, 古典建筑, 飘逸衣袂, 唯美意境",
+    negativePrompt: "现代元素, 西式建筑, 写实风格",
+    aspectRatio: "9:16",
+    videoFrameRate: "24",
+    motionIntensity: "subtle"
+  },
+  "都市甜宠": {
+    artStyle: "唯美漫画",
+    colorTone: "粉嫩甜美色调",
+    lightingStyle: "柔焦梦幻光",
+    cameraStyle: "浪漫镜头",
+    mood: "甜蜜浪漫",
+    customPrompt: "现代都市, 甜宠风格, 柔光效果, 梦幻氛围, 精致五官, 时尚穿搭, 浪漫场景",
+    negativePrompt: "暗黑风格, 恐怖元素, 粗糙画风",
+    aspectRatio: "9:16",
+    videoFrameRate: "30",
+    motionIntensity: "normal"
+  },
+  "霸总虐恋": {
+    artStyle: "写实漫画",
+    colorTone: "冷暖对比色调",
+    lightingStyle: "戏剧性侧光",
+    cameraStyle: "电影级特写",
+    mood: "虐恋情深",
+    customPrompt: "现代都市, 霸道总裁风格, 高级感, 戏剧性光影, 情绪张力, 豪华场景, 西装革履",
+    negativePrompt: "卡通风格, 低质量, 变形",
+    aspectRatio: "9:16",
+    videoFrameRate: "24",
+    motionIntensity: "normal"
+  },
+  "重生逆袭": {
+    artStyle: "写实漫画",
+    colorTone: "高对比鲜艳",
+    lightingStyle: "高光打亮",
+    cameraStyle: "快节奏剪辑",
+    mood: "爽快逆袭",
+    customPrompt: "重生题材, 逆袭风格, 表情夸张, 戏剧张力, 对比强烈, 高光时刻, 情绪饱满",
+    negativePrompt: "平淡无奇, 暗沉色调",
+    aspectRatio: "9:16",
+    videoFrameRate: "30",
+    motionIntensity: "dynamic"
+  },
+  "玄幻修仙": {
+    artStyle: "东方玄幻",
+    colorTone: "金紫神秘色调",
+    lightingStyle: "炫光特效",
+    cameraStyle: "史诗级镜头",
+    mood: "热血震撼",
+    customPrompt: "玄幻修仙, 法阵符文, 金光闪耀, 灵气外溢, 飞剑法宝, 气势磅礴, 仙山福地",
+    negativePrompt: "现代科技, 西方魔法, 低质量",
+    aspectRatio: "9:16",
+    videoFrameRate: "24",
+    motionIntensity: "dynamic"
+  },
+  "战神归来": {
+    artStyle: "硬派写实",
+    colorTone: "冷酷金属色调",
+    lightingStyle: "硬朗光线",
+    cameraStyle: "动作电影镜头",
+    mood: "热血战斗",
+    customPrompt: "战神题材, 硬汉风格, 军事元素, 肌肉线条, 冷峻表情, 战斗场景, 爆炸特效",
+    negativePrompt: "软萌可爱, 女性化",
+    aspectRatio: "9:16",
+    videoFrameRate: "30",
+    motionIntensity: "dynamic"
+  },
+  "宫斗权谋": {
+    artStyle: "古典华丽",
+    colorTone: "宫廷富贵色调",
+    lightingStyle: "烛光暖调",
+    cameraStyle: "宫廷剧镜头",
+    mood: "明争暗斗",
+    customPrompt: "古代宫廷, 华丽服饰, 雕梁画栋, 勾心斗角, 美人如玉, 权谋深沉, 宫墙深院",
+    negativePrompt: "现代元素, 简约风格",
+    aspectRatio: "9:16",
+    videoFrameRate: "24",
+    motionIntensity: "subtle"
+  },
+  "末世求生": {
+    artStyle: "废土风格",
+    colorTone: "灰暗荒凉色调",
+    lightingStyle: "昏暗末日光",
+    cameraStyle: "手持晃动镜头",
+    mood: "紧张求生",
+    customPrompt: "末世废土, 丧尸危机, 荒凉城市, 破败建筑, 求生装备, 紧张氛围, 危机四伏",
+    negativePrompt: "明亮温馨, 可爱风格",
+    aspectRatio: "16:9",
+    videoFrameRate: "30",
+    motionIntensity: "dynamic"
+  },
+  "校园青春": {
+    artStyle: "清新漫画",
+    colorTone: "明亮清新色调",
+    lightingStyle: "阳光明媚",
+    cameraStyle: "青春活力镜头",
+    mood: "青涩甜蜜",
+    customPrompt: "校园青春, 阳光少年少女, 教室走廊, 樱花飘落, 制服穿搭, 纯真美好, 青春洋溢",
+    negativePrompt: "暗黑成人内容, 暴力元素",
+    aspectRatio: "9:16",
+    videoFrameRate: "30",
+    motionIntensity: "normal"
+  },
+  "国风唯美": {
+    artStyle: "国画工笔",
+    colorTone: "水墨淡彩",
+    lightingStyle: "中式柔光",
+    cameraStyle: "诗意镜头",
+    mood: "典雅诗意",
+    customPrompt: "中国风, 工笔画风格, 汉服古装, 亭台楼阁, 山水意境, 梅兰竹菊, 诗情画意, 雅致唯美",
+    negativePrompt: "西式风格, 现代元素, 粗糙线条",
+    aspectRatio: "9:16",
+    videoFrameRate: "24",
+    motionIntensity: "subtle"
+  },
+  // ========== 影视公司风格 ==========
+  "皮克斯风格": {
+    artStyle: "3D动画",
+    colorTone: "鲜艳明快",
+    lightingStyle: "柔和光线",
+    cameraStyle: "电影级构图",
+    mood: "温馨治愈",
+    customPrompt: "Pixar style, 3D animation, vibrant colors, family-friendly, emotional storytelling, detailed textures",
+    negativePrompt: "写实人物, 暗黑恐怖, 暴力血腥",
+    aspectRatio: "16:9",
+    videoFrameRate: "24",
+    motionIntensity: "normal"
+  },
+  "漫威风格": {
+    artStyle: "超级英雄",
+    colorTone: "高饱和度",
+    lightingStyle: "强对比光",
+    cameraStyle: "IMAX大场面",
+    mood: "史诗激动",
+    customPrompt: "Marvel cinematic style, epic action, superhero aesthetic, CGI effects, dramatic poses, heroic lighting",
+    negativePrompt: "低成本, 简陋特效, 平淡日常",
+    aspectRatio: "21:9",
+    videoFrameRate: "24",
+    motionIntensity: "dynamic"
+  },
+  // ========== 地区风格 ==========
+  "武侠风格": {
+    artStyle: "古装写实",
+    colorTone: "中国传统色",
+    lightingStyle: "自然光",
+    cameraStyle: "广角动作",
+    mood: "侠义豪情",
+    customPrompt: "Chinese wuxia style, martial arts, traditional costume, ancient China, sword fighting, wire-fu action",
+    negativePrompt: "现代元素, 西方魔法, 科幻风格",
+    aspectRatio: "16:9",
+    videoFrameRate: "24",
+    motionIntensity: "dynamic"
+  },
+  "宝莱坞风格": {
+    artStyle: "印度电影",
+    colorTone: "鲜艳饱满",
+    lightingStyle: "明亮照明",
+    cameraStyle: "歌舞镜头",
+    mood: "欢快浪漫",
+    customPrompt: "Bollywood style, vibrant colors, dance sequences, romantic drama, elaborate costumes, festive atmosphere",
+    negativePrompt: "暗黑压抑, 极简风格, 冷色调",
+    aspectRatio: "16:9",
+    videoFrameRate: "30",
+    motionIntensity: "dynamic"
+  }
+};
+const DEFAULT_NEGATIVE_PROMPT = "变形, 扭曲, 比例失调, 画工粗糙, 人体结构错误, 多余肢体, 缺失肢体, 悬浮肢体, 断裂肢体, 畸变, 变异, 丑陋, 恶心, 模糊, 截肢, 多余手指, 缺失手指, 手部畸形, 三只手, 手指过多, 手指粘连, 低分辨率, 质量差, 最差质量, 压缩失真, 水印, 文字, 签名, 用户名, 画面裁切, 画面外内容";
 function applyPromptWeight(text, weight = 1.2) {
   if (weight === 1) return text;
   return `(${text}:${weight.toFixed(1)})`;
+}
+function translateToChineseStyle(style) {
+  const translations = {
+    "film noir": "黑色电影风格",
+    "anime": "日系动漫风格",
+    "realistic": "写实风格",
+    "watercolor": "水彩风格",
+    "oil painting": "油画风格",
+    "cyberpunk": "赛博朋克风格",
+    "fantasy": "奇幻风格",
+    "horror": "恐怖风格",
+    "romantic": "浪漫风格",
+    "noir": "黑白电影风格"
+  };
+  const lowerStyle = style.toLowerCase();
+  for (const [en, cn2] of Object.entries(translations)) {
+    if (lowerStyle.includes(en)) {
+      return cn2;
+    }
+  }
+  return style.includes("风格") ? style : `${style}风格`;
 }
 function generateStoryboardImagePrompt(panel, characters, scenes, directorStyle) {
   const cameraLang = [];
@@ -7519,30 +7905,10 @@ function generateStoryboardImagePrompt(panel, characters, scenes, directorStyle)
   result += ` --neg ${negPrompt}`;
   return result;
 }
-function translateToChineseStyle(style) {
-  const translations = {
-    "film noir": "黑色电影风格",
-    "anime": "日系动漫风格",
-    "realistic": "写实风格",
-    "watercolor": "水彩风格",
-    "oil painting": "油画风格",
-    "cyberpunk": "赛博朋克风格",
-    "fantasy": "奇幻风格",
-    "horror": "恐怖风格",
-    "romantic": "浪漫风格",
-    "noir": "黑白电影风格"
-  };
-  const lowerStyle = style.toLowerCase();
-  for (const [en, cn2] of Object.entries(translations)) {
-    if (lowerStyle.includes(en)) {
-      return cn2;
-    }
-  }
-  return style.includes("风格") ? style : `${style}风格`;
-}
 function generateStoryboardVideoPrompt(panel, characters, scenes, directorStyle, platform = "generic", prevPanel) {
   const parts = [];
   const actualPrevPanel = typeof platform === "object" ? platform : prevPanel;
+  const actualPlatform = typeof platform === "string" ? platform : "generic";
   if (actualPrevPanel && actualPrevPanel.endFrame) {
     parts.push(`[过渡] 承接上一镜：${actualPrevPanel.endFrame}，画面自然延续`);
   }
@@ -7781,9 +8147,9 @@ function generateStoryboardVideoPrompt(panel, characters, scenes, directorStyle,
         return parts2.filter((p) => p).join(", ");
     }
   };
-  let result = formatForPlatform(parts, platform);
+  let result = formatForPlatform(parts, actualPlatform);
   if (directorStyle == null ? void 0 : directorStyle.negativePrompt) {
-    if (platform === "comfyui") {
+    if (actualPlatform === "comfyui") {
       result += `, negative_prompt: "${directorStyle.negativePrompt}"`;
     } else {
       result += ` --neg ${directorStyle.negativePrompt}`;
@@ -7791,202 +8157,6 @@ function generateStoryboardVideoPrompt(panel, characters, scenes, directorStyle,
   }
   return result;
 }
-const DIRECTOR_STYLE_PRESETS = {
-  "宫崎骏风格": {
-    artStyle: "手绘动画",
-    colorTone: "温暖柔和色调",
-    lightingStyle: "自然柔和光线",
-    cameraStyle: "电影级镜头",
-    mood: "温馨治愈",
-    customPrompt: "Studio Ghibli style, hand-drawn animation, watercolor aesthetic, nature elements",
-    negativePrompt: "写实风格, 3D渲染, 暗黑恐怖, 血腥暴力",
-    aspectRatio: "16:9",
-    videoFrameRate: "24",
-    motionIntensity: "subtle"
-  },
-  "新海诚风格": {
-    artStyle: "唯美写实",
-    colorTone: "高饱和度鲜艳色彩",
-    lightingStyle: "戏剧性光影对比",
-    cameraStyle: "广角镜头",
-    mood: "浪漫忧郁",
-    customPrompt: "Makoto Shinkai style, detailed urban scenery, beautiful sky, lens flare, romantic atmosphere",
-    negativePrompt: "卡通Q版, 粗糙线条, 暗沉色调",
-    aspectRatio: "16:9",
-    videoFrameRate: "24",
-    motionIntensity: "normal"
-  },
-  "诺兰风格": {
-    artStyle: "写实主义",
-    colorTone: "冷色调去饱和",
-    lightingStyle: "强对比戏剧光",
-    cameraStyle: "史诗级IMAX镜头",
-    mood: "紧张悬疑",
-    customPrompt: "Christopher Nolan style, realistic, IMAX cinematography, wide angle, dramatic lighting",
-    negativePrompt: "卡通风格, 鲜艳色彩, 可爱元素",
-    aspectRatio: "21:9",
-    videoFrameRate: "24",
-    motionIntensity: "dynamic"
-  },
-  "昆汀风格": {
-    artStyle: "复古胶片",
-    colorTone: "鲜艳高饱和色彩",
-    lightingStyle: "强烈对比光线",
-    cameraStyle: "特写广角交替",
-    mood: "暴力美学",
-    customPrompt: "Quentin Tarantino style, retro film grain, vibrant colors, extreme close-ups, stylized violence",
-    negativePrompt: "温馨可爱, 柔和色调, 儿童向",
-    aspectRatio: "16:9",
-    videoFrameRate: "24",
-    motionIntensity: "dynamic"
-  },
-  "赛博朋克": {
-    artStyle: "赛博朋克",
-    colorTone: "霓虹色彩",
-    lightingStyle: "霓虹灯光效",
-    cameraStyle: "未来科技镜头",
-    mood: "神秘科技",
-    customPrompt: "cyberpunk style, neon lights, futuristic city, holographic elements, rain and reflections",
-    negativePrompt: "自然田园, 古典风格, 暖色调",
-    aspectRatio: "21:9",
-    videoFrameRate: "30",
-    motionIntensity: "dynamic"
-  },
-  "黑色电影": {
-    artStyle: "黑白胶片",
-    colorTone: "黑白高对比",
-    lightingStyle: "强烈阴影",
-    cameraStyle: "经典胶片镜头",
-    mood: "阴郁悬疑",
-    customPrompt: "film noir style, black and white, dramatic shadows, venetian blinds lighting, mystery atmosphere",
-    negativePrompt: "彩色画面, 明亮温馨, 可爱卡通",
-    aspectRatio: "16:9",
-    videoFrameRate: "24",
-    motionIntensity: "subtle"
-  },
-  // ========== AI漫剧爆款风格 ==========
-  "古风仙侠": {
-    artStyle: "国风水墨",
-    colorTone: "青绿山水色调",
-    lightingStyle: "柔和仙气光",
-    cameraStyle: "飘逸镜头",
-    mood: "仙气飘飘",
-    customPrompt: "中国古典仙侠, 水墨画风格, 云雾缭绕, 仙鹤飞舞, 古典建筑, 飘逸衣袂, 唯美意境",
-    negativePrompt: "现代元素, 西式建筑, 写实风格",
-    aspectRatio: "9:16",
-    videoFrameRate: "24",
-    motionIntensity: "subtle"
-  },
-  "都市甜宠": {
-    artStyle: "唯美漫画",
-    colorTone: "粉嫩甜美色调",
-    lightingStyle: "柔焦梦幻光",
-    cameraStyle: "浪漫镜头",
-    mood: "甜蜜浪漫",
-    customPrompt: "现代都市, 甜宠风格, 柔光效果, 梦幻氛围, 精致五官, 时尚穿搭, 浪漫场景",
-    negativePrompt: "暗黑风格, 恐怖元素, 粗糙画风",
-    aspectRatio: "9:16",
-    videoFrameRate: "30",
-    motionIntensity: "normal"
-  },
-  "霸总虐恋": {
-    artStyle: "写实漫画",
-    colorTone: "冷暖对比色调",
-    lightingStyle: "戏剧性侧光",
-    cameraStyle: "电影级特写",
-    mood: "虐恋情深",
-    customPrompt: "现代都市, 霸道总裁风格, 高级感, 戏剧性光影, 情绪张力, 豪华场景, 西装革履",
-    negativePrompt: "卡通风格, 低质量, 变形",
-    aspectRatio: "9:16",
-    videoFrameRate: "24",
-    motionIntensity: "normal"
-  },
-  "重生逆袭": {
-    artStyle: "写实漫画",
-    colorTone: "高对比鲜艳",
-    lightingStyle: "高光打亮",
-    cameraStyle: "快节奏剪辑",
-    mood: "爽快逆袭",
-    customPrompt: "重生题材, 逆袭风格, 表情夸张, 戏剧张力, 对比强烈, 高光时刻, 情绪饱满",
-    negativePrompt: "平淡无奇, 暗沉色调",
-    aspectRatio: "9:16",
-    videoFrameRate: "30",
-    motionIntensity: "dynamic"
-  },
-  "玄幻修仙": {
-    artStyle: "东方玄幻",
-    colorTone: "金紫神秘色调",
-    lightingStyle: "炫光特效",
-    cameraStyle: "史诗级镜头",
-    mood: "热血震撼",
-    customPrompt: "玄幻修仙, 法阵符文, 金光闪耀, 灵气外溢, 飞剑法宝, 气势磅礴, 仙山福地",
-    negativePrompt: "现代科技, 西方魔法, 低质量",
-    aspectRatio: "9:16",
-    videoFrameRate: "24",
-    motionIntensity: "dynamic"
-  },
-  "战神归来": {
-    artStyle: "硬派写实",
-    colorTone: "冷酷金属色调",
-    lightingStyle: "硬朗光线",
-    cameraStyle: "动作电影镜头",
-    mood: "热血战斗",
-    customPrompt: "战神题材, 硬汉风格, 军事元素, 肌肉线条, 冷峻表情, 战斗场景, 爆炸特效",
-    negativePrompt: "软萌可爱, 女性化",
-    aspectRatio: "9:16",
-    videoFrameRate: "30",
-    motionIntensity: "dynamic"
-  },
-  "宫斗权谋": {
-    artStyle: "古典华丽",
-    colorTone: "宫廷富贵色调",
-    lightingStyle: "烛光暖调",
-    cameraStyle: "宫廷剧镜头",
-    mood: "明争暗斗",
-    customPrompt: "古代宫廷, 华丽服饰, 雕梁画栋, 勾心斗角, 美人如玉, 权谋深沉, 宫墙深院",
-    negativePrompt: "现代元素, 简约风格",
-    aspectRatio: "9:16",
-    videoFrameRate: "24",
-    motionIntensity: "subtle"
-  },
-  "末世求生": {
-    artStyle: "废土风格",
-    colorTone: "灰暗荒凉色调",
-    lightingStyle: "昏暗末日光",
-    cameraStyle: "手持晃动镜头",
-    mood: "紧张求生",
-    customPrompt: "末世废土, 丧尸危机, 荒凉城市, 破败建筑, 求生装备, 紧张氛围, 危机四伏",
-    negativePrompt: "明亮温馨, 可爱风格",
-    aspectRatio: "16:9",
-    videoFrameRate: "30",
-    motionIntensity: "dynamic"
-  },
-  "校园青春": {
-    artStyle: "清新漫画",
-    colorTone: "明亮清新色调",
-    lightingStyle: "阳光明媚",
-    cameraStyle: "青春活力镜头",
-    mood: "青涩甜蜜",
-    customPrompt: "校园青春, 阳光少年少女, 教室走廊, 樱花飘落, 制服穿搭, 纯真美好, 青春洋溢",
-    negativePrompt: "暗黑成人内容, 暴力元素",
-    aspectRatio: "9:16",
-    videoFrameRate: "30",
-    motionIntensity: "normal"
-  },
-  "国风唯美": {
-    artStyle: "国画工笔",
-    colorTone: "水墨淡彩",
-    lightingStyle: "中式柔光",
-    cameraStyle: "诗意镜头",
-    mood: "典雅诗意",
-    customPrompt: "中国风, 工笔画风格, 汉服古装, 亭台楼阁, 山水意境, 梅兰竹菊, 诗情画意, 雅致唯美",
-    negativePrompt: "西式风格, 现代元素, 粗糙线条",
-    aspectRatio: "9:16",
-    videoFrameRate: "24",
-    motionIntensity: "subtle"
-  }
-};
-const DEFAULT_NEGATIVE_PROMPT = "变形, 扭曲, 比例失调, 画工粗糙, 人体结构错误, 多余肢体, 缺失肢体, 悬浮肢体, 断裂肢体, 畸变, 变异, 丑陋, 恶心, 模糊, 截肢, 多余手指, 缺失手指, 手部畸形, 三只手, 手指过多, 手指粘连, 低分辨率, 质量差, 最差质量, 压缩失真, 水印, 文字, 签名, 用户名, 画面裁切, 画面外内容";
 function generateNegativePrompt(directorStyle) {
   if (directorStyle == null ? void 0 : directorStyle.negativePrompt) {
     return directorStyle.negativePrompt;
@@ -8025,13 +8195,13 @@ const PLATFORM_PARAMS = {
 function generatePanelPromptPack(panel, characters, scenes, directorStyle, platform = "generic") {
   const platformConfig = PLATFORM_PARAMS[platform];
   let imagePrompt = generateStoryboardImagePrompt(panel, characters, scenes, directorStyle);
-  let videoPrompt = generateStoryboardVideoPrompt(panel, characters, scenes, directorStyle);
+  let videoPrompt = generateStoryboardVideoPrompt(panel, characters, scenes, directorStyle, platform);
   if (platform === "midjourney") {
     imagePrompt += platformConfig.suffix;
   } else if (platform === "runway" || platform === "pika") {
     videoPrompt += platformConfig.suffix;
   }
-  const charRefs = panel.characters.map((name) => characters.find((c) => c.name === name)).filter((c) => c !== void 0).map((c) => generateCharacterDefinition(c));
+  const charRefs = (panel.characters || []).map((name) => characters.find((c) => c.name === name)).filter((c) => c !== void 0).map((c) => generateCharacterDefinition(c));
   return {
     imagePrompt,
     videoPrompt,
@@ -8076,25 +8246,1015 @@ function exportAllPanelPrompts(panels, characters, scenes, directorStyle, platfo
   });
   return output.join("\n");
 }
-const promptGenerator = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
-  __proto__: null,
-  DEFAULT_NEGATIVE_PROMPT,
-  DIRECTOR_STYLE_PRESETS,
-  EMOTIONAL_CAMERA_PRESETS,
-  MUSIC_PRESETS,
-  PROFESSIONAL_CAMERA_TEMPLATES,
-  SOUND_PRESETS,
-  TIME_CONTROL_PRESETS,
-  VISUAL_EFFECT_PRESETS,
-  applyPromptWeight,
-  exportAllCharacterDefinitions,
-  exportAllPanelPrompts,
-  generateCharacterDefinition,
-  generateNegativePrompt,
-  generatePanelPromptPack,
-  generateStoryboardImagePrompt,
-  generateStoryboardVideoPrompt
-}, Symbol.toStringTag, { value: "Module" }));
+function smartFillPanel(panel, scene, prevPanel, nextPanel, allPanels) {
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p;
+  const desc = (panel.description || "").toLowerCase();
+  const location = ((scene == null ? void 0 : scene.location) || "").toLowerCase();
+  const beat = (scene == null ? void 0 : scene.beat) || "";
+  const mood = (panel.atmosphere || panel.emotionalBeat || beat || "").toUpperCase();
+  if (prevPanel && prevPanel.endFrame && (!panel.startFrame || panel.startFrame === "")) {
+    panel.startFrame = `承接上一镜：${prevPanel.endFrame}`;
+  }
+  if (allPanels && allPanels.length > 0 && (!panel.music || panel.music === "")) {
+    const sameScenePanels = allPanels.filter((p) => p.sceneId === panel.sceneId && p.music);
+    if (sameScenePanels.length > 0) {
+      panel.music = sameScenePanels[0].music;
+    }
+  }
+  if (allPanels && allPanels.length > 0 && (!panel.colorGrade || panel.colorGrade === "" || panel.colorGrade === "自然调色")) {
+    const sameEpisodePanels = allPanels.filter((p) => p.episodeNumber === panel.episodeNumber && p.colorGrade && p.colorGrade !== "自然调色");
+    if (sameEpisodePanels.length > 0) {
+      panel.colorGrade = sameEpisodePanels[0].colorGrade;
+    }
+  }
+  if (!panel.soundEffects || panel.soundEffects.length === 0) {
+    const soundEffects = [];
+    if (location.includes("战斗") || desc.includes("打斗") || desc.includes("击")) {
+      soundEffects.push(...SOUND_PRESETS["战斗"] || ["战斗音效"]);
+    } else if (location.includes("雨") || desc.includes("下雨")) {
+      soundEffects.push(...SOUND_PRESETS["雨景"] || ["雨声"]);
+    } else if (location.includes("森") || location.includes("山") || location.includes("野")) {
+      soundEffects.push(...SOUND_PRESETS["森林"] || ["森林环境音"]);
+    } else if (location.includes("市") || location.includes("街") || location.includes("路")) {
+      soundEffects.push(...SOUND_PRESETS["城市环境"] || ["城市背景音"]);
+    } else if (location.includes("海") || location.includes("水") || location.includes("湖")) {
+      soundEffects.push(...SOUND_PRESETS["水边"] || ["水声"]);
+    } else if (location.includes("科幻") || location.includes("机械") || location.includes("船")) {
+      soundEffects.push(...SOUND_PRESETS["科幻/机械"] || ["机械音效"]);
+    } else {
+      soundEffects.push("环境背景音");
+    }
+    if (desc.includes("脚步") || desc.includes("走") || desc.includes("跑")) {
+      soundEffects.push("规律脚步声");
+    }
+    if (desc.includes("门") || desc.includes("开") || desc.includes("关")) {
+      soundEffects.push("木门转轴声");
+    }
+    if (desc.includes("说") || desc.includes("喊") || panel.dialogue) {
+      soundEffects.push("清晰人声对白");
+    }
+    panel.soundEffects = [...new Set(soundEffects)].slice(0, 3);
+  }
+  if (!panel.music || panel.music === "背景音乐") {
+    if (mood.includes("TENSE") || mood.includes("紧张") || mood.includes("危险")) {
+      panel.music = (_a = MUSIC_PRESETS["紧张"]) == null ? void 0 : _a[0];
+    } else if (mood.includes("ROMANTIC") || mood.includes("浪漫") || mood.includes("温馨")) {
+      panel.music = (_b = MUSIC_PRESETS["浪漫"]) == null ? void 0 : _b[0];
+    } else if (mood.includes("SAD") || mood.includes("悲伤") || mood.includes("忧郁")) {
+      panel.music = (_c = MUSIC_PRESETS["悲伤"]) == null ? void 0 : _c[0];
+    } else if (mood.includes("HAPPY") || mood.includes("欢快") || mood.includes("轻松")) {
+      panel.music = (_d = MUSIC_PRESETS["欢快"]) == null ? void 0 : _d[0];
+    } else if (mood.includes("ACTION") || mood.includes("动作") || mood.includes("热血")) {
+      panel.music = (_e = MUSIC_PRESETS["热血"]) == null ? void 0 : _e[0];
+    } else if (location.includes("古") || location.includes("武侠") || location.includes("庙")) {
+      panel.music = (_f = MUSIC_PRESETS["古风"]) == null ? void 0 : _f[0];
+    } else {
+      panel.music = "通用叙事背景音乐";
+    }
+  }
+  if (!panel.cameraMovement || panel.cameraMovement === "静止") {
+    const prevMovement = (prevPanel == null ? void 0 : prevPanel.cameraMovement) || "";
+    const nextHasDialogue = (nextPanel == null ? void 0 : nextPanel.dialogue) && nextPanel.dialogue.length > 10;
+    const isSceneStart = panel.panelNumber === 1 || panel.sceneId !== (prevPanel == null ? void 0 : prevPanel.sceneId);
+    const isSceneEnd = nextPanel && panel.sceneId !== nextPanel.sceneId;
+    const getCoherentMovement = () => {
+      if (isSceneStart) return "静止";
+      if (isSceneEnd) return "抽离后拉";
+      if (nextHasDialogue) return "静止";
+      if (prevMovement === "聚焦推进" || prevMovement === "爆发急推" || prevMovement.includes("推")) {
+        return "静止";
+      }
+      if (prevMovement === "抽离后拉" || prevMovement.includes("拉")) {
+        return "聚焦推进";
+      }
+      if (prevMovement === "静止" || prevMovement === "") {
+        if (mood.includes("TENSE") || mood.includes("ANGRY")) return "爆发急推";
+        if (mood.includes("SAD") || mood.includes("LONELY")) return "压抑下降";
+        if (mood.includes("REVEAL")) return "升华上升";
+        return "陪伴平移";
+      }
+      return "静止";
+    };
+    if (mood.includes("TENSE") || mood.includes("ANGRY")) {
+      panel.cameraMovement = isSceneStart ? "静止" : "手持抖动";
+    } else if (mood.includes("SAD") || mood.includes("LONELY")) {
+      panel.cameraMovement = getCoherentMovement();
+    } else if (mood.includes("MYSTERY") || mood.includes("SUSPENSE")) {
+      panel.cameraMovement = "探索横摇";
+    } else if (mood.includes("REVEAL") || mood.includes("SUBLIME")) {
+      panel.cameraMovement = isSceneEnd ? "抽离后拉" : "升华上升";
+    } else if (mood.includes("ROMANTIC") || mood.includes("CALM")) {
+      panel.cameraMovement = "陪伴平移";
+    } else if (mood.includes("ACTION") || mood.includes("CHASE")) {
+      panel.cameraMovement = "跟";
+    } else if (panel.dialogue && panel.dialogue.length > 20) {
+      panel.cameraMovement = "静止";
+    } else {
+      panel.cameraMovement = getCoherentMovement();
+    }
+  }
+  if (!panel.startFrame || panel.startFrame === "静止画面") {
+    const chars = ((_g = panel.characters) == null ? void 0 : _g.join("、")) || "主体";
+    const movement = panel.movementType || panel.cameraMovement || "静止";
+    if (movement === "DOLLY_IN" || movement === "推" || movement === "聚焦推进" || movement === "爆发急推") {
+      panel.startFrame = `${chars}处于全景构图中心`;
+      panel.endFrame = `${chars}面部特写，表情细节清晰`;
+    } else if (movement === "DOLLY_OUT" || movement === "拉" || movement === "抽离后拉" || movement === "爆发急拉") {
+      panel.startFrame = `${chars}近景特写`;
+      panel.endFrame = `${chars}在广阔远景中显得渺小`;
+    } else if (movement === "FOLLOW" || movement === "跟" || movement === "陪伴平移") {
+      panel.startFrame = `${chars}开始侧向/正向移动`;
+      panel.endFrame = `保持与${chars}同步高度的动态跟随`;
+    } else if (movement === "PAN_L" || movement === "PAN_R" || movement === "探索横摇") {
+      panel.startFrame = `场景边缘起始点，${chars}尚未入画`;
+      panel.endFrame = `横移扫过场景，${chars}出现在黄金分割点`;
+    } else if (panel.dialogue) {
+      panel.startFrame = `${chars}开口瞬间的气息捕捉`;
+      panel.endFrame = `${chars}说完对白后的微表情收尾`;
+    } else {
+      panel.startFrame = `${chars}处于画面稳定构图位置`;
+      panel.endFrame = `画面保持稳定，光影微动`;
+    }
+  }
+  if (!panel.transition || panel.transition === "切至") {
+    if (desc.includes("回忆") || desc.includes("过去")) {
+      panel.transition = "溶至";
+    } else if (desc.includes("惊醒") || desc.includes("突变")) {
+      panel.transition = "闪白";
+    } else if (desc.includes("落幕") || desc.includes("结束")) {
+      panel.transition = "淡出";
+    }
+  }
+  if (!panel.motionSpeed || panel.motionSpeed === "normal") {
+    if (mood.includes("TENSE") || mood.includes("ACTION")) {
+      panel.motionSpeed = "fast";
+    } else if (mood.includes("CALM") || mood.includes("SAD")) {
+      panel.motionSpeed = "slow";
+    }
+  }
+  const shotSize = panel.shotSize || panel.shot || "MS";
+  if (!panel.lens) {
+    if (shotSize === "ECU" || shotSize === "大特写") {
+      panel.lens = "100mm macro";
+      panel.fStop = "f/2.8";
+      panel.depthOfField = "SHALLOW";
+    } else if (shotSize === "CU" || shotSize === "特写") {
+      panel.lens = "85mm";
+      panel.fStop = "f/2";
+      panel.depthOfField = "SHALLOW";
+    } else if (shotSize === "MCU" || shotSize === "近景") {
+      panel.lens = "50mm";
+      panel.fStop = "f/2.8";
+      panel.depthOfField = "SHALLOW";
+    } else if (shotSize === "MS" || shotSize === "中景") {
+      panel.lens = "50mm";
+      panel.fStop = "f/4";
+      panel.depthOfField = "NORMAL";
+    } else if (shotSize === "MWS" || shotSize === "中全景") {
+      panel.lens = "35mm";
+      panel.fStop = "f/5.6";
+      panel.depthOfField = "NORMAL";
+    } else if (shotSize === "WS" || shotSize === "全景" || shotSize === "远景") {
+      panel.lens = "24mm";
+      panel.fStop = "f/8";
+      panel.depthOfField = "DEEP";
+    } else if (shotSize === "EWS" || shotSize === "大远景") {
+      panel.lens = "16mm";
+      panel.fStop = "f/11";
+      panel.depthOfField = "DEEP";
+    } else {
+      panel.lens = "50mm";
+      panel.fStop = "f/4";
+      panel.depthOfField = "NORMAL";
+    }
+  }
+  if (!panel.lighting || !panel.lighting.mood) {
+    panel.lighting = panel.lighting || {};
+    if (mood.includes("TENSE") || mood.includes("紧张") || mood.includes("SUSPENSE")) {
+      panel.lighting.mood = "低调光影，高反差";
+      panel.lighting.keyLight = "侧光为主，形成明暗对比";
+    } else if (mood.includes("ROMANTIC") || mood.includes("浪漫") || mood.includes("温馨")) {
+      panel.lighting.mood = "柔和暖光，高调氛围";
+      panel.lighting.keyLight = "柔光正面，轮廓光勾边";
+    } else if (mood.includes("SAD") || mood.includes("悲伤") || mood.includes("忧郁")) {
+      panel.lighting.mood = "冷色调，低饱和";
+      panel.lighting.keyLight = "顶光或逆光，形成剪影";
+    } else if (mood.includes("ACTION") || mood.includes("动作") || mood.includes("热血")) {
+      panel.lighting.mood = "高对比，动态光效";
+      panel.lighting.keyLight = "硬光为主，强调立体";
+    } else if (location.includes("夜") || location.includes("晚")) {
+      panel.lighting.mood = "夜景氛围，点光源为主";
+      panel.lighting.keyLight = "实景光源（路灯/月光）";
+      panel.lighting.practicalLights = ["城市灯光", "月光"];
+    } else if (location.includes("日") || location.includes("白天")) {
+      panel.lighting.mood = "自然日光，通透明亮";
+      panel.lighting.keyLight = "太阳光为主光";
+    } else {
+      panel.lighting.mood = "自然光影";
+    }
+  }
+  if (!panel.props || panel.props.length === 0) {
+    const propsExtracted = [];
+    const propKeywords = ["剑", "刀", "枪", "书", "杯", "碗", "椅", "桌", "门", "窗", "灯", "镜", "笔", "纸", "信", "手机", "电脑", "车", "包", "伞", "钥匙", "戒指", "项链", "眼镜", "帽子", "花", "酒", "药", "钱", "地图", "照片"];
+    for (const keyword of propKeywords) {
+      if (desc.includes(keyword)) {
+        propsExtracted.push(keyword);
+      }
+    }
+    if (propsExtracted.length > 0) {
+      panel.props = propsExtracted.slice(0, 5);
+    }
+  }
+  if (!panel.vfx || panel.vfx.length === 0) {
+    const vfxList = [];
+    if (desc.includes("爆炸") || desc.includes("火")) {
+      vfxList.push("火焰特效", "烟尘粒子");
+    }
+    if (desc.includes("魔法") || desc.includes("法术") || desc.includes("能量")) {
+      vfxList.push("魔法光效", "能量波动");
+    }
+    if (desc.includes("雨") || desc.includes("雪")) {
+      vfxList.push("天气粒子系统");
+    }
+    if (desc.includes("闪电") || desc.includes("电")) {
+      vfxList.push("闪电特效");
+    }
+    if (desc.includes("模糊") || desc.includes("慢动作")) {
+      vfxList.push("运动模糊");
+    }
+    if (vfxList.length > 0) {
+      panel.vfx = vfxList;
+    }
+  }
+  if (!panel.colorGrade) {
+    if (mood.includes("TENSE") || mood.includes("紧张")) {
+      panel.colorGrade = "冷调蓝绿，去饱和";
+    } else if (mood.includes("ROMANTIC") || mood.includes("浪漫")) {
+      panel.colorGrade = "暖调橙黄，柔化高光";
+    } else if (mood.includes("SAD") || mood.includes("悲伤")) {
+      panel.colorGrade = "低饱和蓝灰，压暗中间调";
+    } else if (mood.includes("ACTION") || mood.includes("热血")) {
+      panel.colorGrade = "高对比橙蓝色调";
+    } else if (location.includes("古") || location.includes("武侠")) {
+      panel.colorGrade = "复古暖黄，略微去饱和";
+    } else {
+      panel.colorGrade = "自然调色";
+    }
+  }
+  if (!panel.setupShot) {
+    const idx = panel.panelNumber || 1;
+    if (((_h = panel.composition) == null ? void 0 : _h.includes("居右")) || ((_i = panel.composition) == null ? void 0 : _i.includes("左侧"))) {
+      panel.setupShot = "A机位";
+    } else if (((_j = panel.composition) == null ? void 0 : _j.includes("居左")) || ((_k = panel.composition) == null ? void 0 : _k.includes("右侧"))) {
+      panel.setupShot = "B机位";
+    } else if (idx % 2 === 1) {
+      panel.setupShot = "A机位";
+    } else {
+      panel.setupShot = "B机位";
+    }
+  }
+  if (!panel.axisNote) {
+    const charCount = ((_l = panel.characters) == null ? void 0 : _l.length) || 0;
+    const prevChars = (prevPanel == null ? void 0 : prevPanel.characters) || [];
+    const sameChars = ((_m = panel.characters) == null ? void 0 : _m.filter((c) => prevChars.includes(c))) || [];
+    const isSceneChange = panel.sceneId !== (prevPanel == null ? void 0 : prevPanel.sceneId);
+    if (isSceneChange) {
+      panel.axisNote = "新场景，重新建立轴线";
+    } else if (charCount >= 3) {
+      panel.axisNote = "群戏场景，建立主轴后保持一致";
+    } else if (panel.dialogue && charCount >= 2) {
+      panel.axisNote = "保持180°轴线，正反打切换";
+    } else if (sameChars.length > 0 && charCount <= 2) {
+      panel.axisNote = `延续上一镜轴线，${sameChars[0]}位置保持`;
+    } else if (panel.cameraMovement === "跟" || panel.movementType === "FOLLOW") {
+      panel.axisNote = "动态轴线，随角色移动";
+    } else if (charCount === 1) {
+      panel.axisNote = "单人镜头，注意与前后镜头朝向一致";
+    } else {
+      panel.axisNote = "保持轴线";
+    }
+  }
+  if (!panel.composition) {
+    const shotSizeVal = panel.shotSize || panel.shot || "";
+    if (desc.includes("窗") || desc.includes("门框") || desc.includes("拱门") || desc.includes("走廊尽头")) {
+      panel.composition = "框架构图，人物被门窗框住";
+    } else if (desc.includes("道路") || desc.includes("走廊") || desc.includes("隧道") || desc.includes("铁轨")) {
+      panel.composition = "引导线构图，纵深延伸";
+    } else if (desc.includes("镜子") || desc.includes("水面倒影") || desc.includes("对称")) {
+      panel.composition = "对称/反射构图";
+    } else if (desc.includes("背影") || desc.includes("剪影") || desc.includes("逆光")) {
+      panel.composition = "轮廓构图，强调形态";
+    } else if (desc.includes("俯瞰") || desc.includes("鸟瞰") || desc.includes("从上往下")) {
+      panel.composition = "俯视构图，展示空间关系";
+    } else if (desc.includes("仰望") || desc.includes("从下往上") || desc.includes("高耸")) {
+      panel.composition = "仰视构图，强调威严/渺小";
+    } else if (desc.includes("角落") || desc.includes("边缘") || desc.includes("靠窗")) {
+      panel.composition = "负空间构图，主体偏侧留白";
+    } else if (desc.includes("人群") || desc.includes("围观") || desc.includes("中心")) {
+      panel.composition = "中心放射构图";
+    } else if (shotSizeVal === "WS" || shotSizeVal === "EWS" || shotSizeVal === "远景" || shotSizeVal === "大远景") {
+      panel.composition = "三分法构图，环境占2/3";
+    } else if (shotSizeVal === "OTS" || panel.dialogue) {
+      panel.composition = "过肩构图，主体偏一侧";
+    } else if (((_n = panel.characters) == null ? void 0 : _n.length) >= 2) {
+      panel.composition = "对称构图，双人居中";
+    } else if (shotSizeVal === "CU" || shotSizeVal === "ECU" || shotSizeVal === "特写") {
+      panel.composition = "中心构图，人物居中";
+    } else {
+      panel.composition = "三分法构图";
+    }
+  }
+  if (!panel.shotIntent) {
+    const shotSizeVal = panel.shotSize || panel.shot || "";
+    if (shotSizeVal === "WS" || shotSizeVal === "EWS" || shotSizeVal === "远景") {
+      panel.shotIntent = "建立空间，交代环境";
+    } else if (panel.dialogue) {
+      panel.shotIntent = "展示对话，传递信息";
+    } else if (shotSizeVal === "CU" || shotSizeVal === "ECU" || shotSizeVal === "特写") {
+      panel.shotIntent = "揭示细节，强调情绪";
+    } else if (mood.includes("TENSE") || mood.includes("紧张")) {
+      panel.shotIntent = "制造紧张，推进冲突";
+    } else if (mood.includes("REVEAL")) {
+      panel.shotIntent = "揭示人物，引发好奇";
+    } else if (panel.panelNumber <= 2) {
+      panel.shotIntent = "开场建立，吸引注意";
+    } else {
+      panel.shotIntent = "推进叙事";
+    }
+  }
+  if (!panel.environmentMotion) {
+    const timeOfDay = ((scene == null ? void 0 : scene.timeOfDay) || "").toLowerCase();
+    const TIME_ENVIRONMENT_MAP = {
+      "清晨": "晨雾弥漫，露水滴落",
+      "早晨": "阳光渐强，鸟鸣阵阵",
+      "黄昏": "夕阳余晖，天色渐暗",
+      "傍晚": "霞光万道，影子拉长",
+      "深夜": "月光摇曳，虫鸣阵阵",
+      "夜晚": "灯光点点，夜色朦胧",
+      "正午": "阳光直射，影子短小",
+      "午后": "阳光斜照，微风轻拂"
+    };
+    if (location.includes("雨") || desc.includes("下雨") || desc.includes("暴雨")) {
+      panel.environmentMotion = "雨水滴落，水花飞溅";
+    } else if (location.includes("雪") || desc.includes("下雪") || desc.includes("飘雪")) {
+      panel.environmentMotion = "雪花飘落，白雪皑皑";
+    } else if (location.includes("风") || desc.includes("狂风") || desc.includes("大风")) {
+      panel.environmentMotion = "狂风呼啸，尘土飞扬";
+    } else if (location.includes("风") || desc.includes("微风") || desc.includes("风")) {
+      panel.environmentMotion = "微风轻拂，衣袂飘动";
+    } else if (location.includes("海") || location.includes("港")) {
+      panel.environmentMotion = "海浪拍岸，海鸥盘旋";
+    } else if (location.includes("河") || location.includes("溪") || location.includes("水")) {
+      panel.environmentMotion = "水波涟漪，倒影摇曳";
+    } else if (location.includes("森") || location.includes("林") || location.includes("树")) {
+      panel.environmentMotion = "树叶轻摇，光影斑驳";
+    } else if (location.includes("火") || desc.includes("火焰") || desc.includes("篝火")) {
+      panel.environmentMotion = "火焰跳动，烟雾升腾";
+    } else if (location.includes("市") || location.includes("街") || location.includes("道")) {
+      panel.environmentMotion = "行人走动，车辆穿梭";
+    } else if (location.includes("酒") || location.includes("餐") || location.includes("咖啡")) {
+      panel.environmentMotion = "人声鼎沸，杯盏交错";
+    } else if (location.includes("工厂") || location.includes("车间")) {
+      panel.environmentMotion = "机器运转，蒸汽喷涌";
+    } else {
+      let matched = false;
+      for (const [key, value] of Object.entries(TIME_ENVIRONMENT_MAP)) {
+        if (timeOfDay.includes(key) || location.includes(key)) {
+          panel.environmentMotion = value;
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) {
+        panel.environmentMotion = "环境平静，光影自然";
+      }
+    }
+  }
+  if (!panel.characterActions || panel.characterActions.length === 0) {
+    const actions = [];
+    const ACTION_PATTERNS = [
+      "皱眉",
+      "微笑",
+      "大笑",
+      "哭泣",
+      "叹息",
+      "惊讶",
+      "愤怒",
+      "沉思",
+      "凝视",
+      "闭眼",
+      "转身",
+      "点头",
+      "摇头",
+      "挥手",
+      "握手",
+      "拥抱",
+      "推开",
+      "拉住",
+      "低头",
+      "抬头",
+      "起身",
+      "坐下",
+      "躺下",
+      "跪下",
+      "弯腰",
+      "伸手",
+      "缩手",
+      "跺脚",
+      "踱步",
+      "走向",
+      "走过",
+      "跑向",
+      "冲向",
+      "逃离",
+      "靠近",
+      "后退",
+      "绕过",
+      "跳起",
+      "踏入",
+      "拿起",
+      "放下",
+      "打开",
+      "关上",
+      "翻开",
+      "撕毁",
+      "扔掉",
+      "接住",
+      "推门",
+      "敲门",
+      "说道",
+      "喊道",
+      "低语",
+      "怒吼",
+      "呢喃",
+      "询问",
+      "回答",
+      "解释",
+      "命令",
+      "恳求"
+    ];
+    if (panel.characters && panel.characters.length > 0) {
+      for (let i = 0; i < Math.min(panel.characters.length, 3); i++) {
+        const char = panel.characters[i];
+        const charFound = [];
+        for (const action of ACTION_PATTERNS) {
+          if (desc.includes(`${char}${action}`) || desc.includes(`${char} ${action}`)) {
+            charFound.push(`${char}:${action}`);
+          } else if (desc.includes(action) && i === 0) {
+            charFound.push(`${char}:${action}`);
+            break;
+          }
+        }
+        if (charFound.length > 0) {
+          actions.push(charFound[0]);
+        }
+      }
+      if (panel.dialogue && panel.characters[0] && !actions.some((a) => a.includes("说"))) {
+        actions.push(`${panel.characters[0]}:说话`);
+      }
+    }
+    if (actions.length > 0) {
+      panel.characterActions = actions;
+    }
+  }
+  console.log(`[智能填充增强版] 音效: ${(_o = panel.soundEffects) == null ? void 0 : _o.join(",")} | 音乐: ${panel.music} | 运镜: ${panel.cameraMovement} | 镜头: ${panel.lens} | 光影: ${(_p = panel.lighting) == null ? void 0 : _p.mood}`);
+  return panel;
+}
+const DENSITY_CONFIG = {
+  compact: {
+    basePerScene: 0.8,
+    // 🆕 进一步降低
+    panelsPerDialogue: 0.4,
+    actionCharsPerPanel: 400,
+    // 每400字1镜
+    minPerScene: 1,
+    maxPerScene: 3,
+    longDialogueThreshold: 150,
+    addReactionShots: false,
+    estimateMultiplier: 0.6,
+    promptDescription: "分镜密度：精简模式。每个场景生成约 1-2 个核心分镜。"
+  },
+  standard: {
+    basePerScene: 0.7,
+    // 🆕 降低：AI 约每场景1.5镜
+    panelsPerDialogue: 0.6,
+    // 🆕 降低
+    actionCharsPerPanel: 200,
+    // 🆕 增大：每200字1镜
+    minPerScene: 1,
+    maxPerScene: 5,
+    longDialogueThreshold: 100,
+    addReactionShots: false,
+    estimateMultiplier: 1,
+    promptDescription: "分镜密度：标准模式。每个场景生成约 1-3 个分镜。"
+  },
+  detailed: {
+    basePerScene: 1.5,
+    // 🆕 降低
+    panelsPerDialogue: 1,
+    actionCharsPerPanel: 100,
+    minPerScene: 3,
+    maxPerScene: 8,
+    longDialogueThreshold: 80,
+    addReactionShots: true,
+    estimateMultiplier: 1.4,
+    promptDescription: "分镜密度：详细模式。每个场景生成约 3-6 个分镜。"
+  }
+};
+function estimatePanelCount(dialogueCount, actionLength, characterCount, mode) {
+  const config = DENSITY_CONFIG[mode];
+  let baseCount = config.basePerScene;
+  const dialoguePanels = dialogueCount * config.panelsPerDialogue;
+  const actionPanels = Math.ceil(actionLength / config.actionCharsPerPanel);
+  const reactionBonus = config.addReactionShots && characterCount >= 2 && dialogueCount >= 2 ? Math.floor(dialogueCount * 0.3) : 0;
+  const total = baseCount + dialoguePanels + actionPanels + reactionBonus;
+  const rawMin = Math.floor(total * 0.8);
+  const rawMax = Math.ceil(total * 1.2);
+  const constrainedMin = Math.max(config.minPerScene, rawMin);
+  const constrainedMax = Math.max(constrainedMin, Math.min(config.maxPerScene, rawMax));
+  return {
+    min: constrainedMin,
+    max: constrainedMax
+  };
+}
+function splitLongDialogue(dialogue, threshold = 100) {
+  if (!dialogue || dialogue.length <= threshold) {
+    return [dialogue];
+  }
+  const chunks = [];
+  const sentences = dialogue.split(/([。！？!?…]+)/);
+  let current = "";
+  for (let i = 0; i < sentences.length; i++) {
+    const part = sentences[i];
+    if ((current + part).length <= threshold) {
+      current += part;
+    } else {
+      if (current.trim()) chunks.push(current.trim());
+      current = part;
+    }
+  }
+  if (current.trim()) chunks.push(current.trim());
+  return chunks.filter((c) => c.length > 0);
+}
+async function generateFallbackPanels(scenes, characters, assetsScenes, densityMode, directorStyle) {
+  const allPanels = [];
+  let panelNumber = 1;
+  scenes.forEach((scene) => {
+    var _a;
+    const dialogueCount = ((_a = scene.dialogues) == null ? void 0 : _a.length) || 0;
+    const actionLength = (scene.action || "").length;
+    devLog(`[Fallback 场景${scene.sceneNumber}] ${dialogueCount}句对白, ${actionLength}字动作`);
+    allPanels.push({
+      id: generateId(),
+      panelNumber: panelNumber++,
+      sceneId: scene.id,
+      episodeNumber: scene.episodeNumber,
+      description: `${scene.location || "场景"}，${scene.timeOfDay || "日"}。${(scene.action || "").substring(0, 80)}`,
+      shot: "远景",
+      angle: "平视",
+      cameraMovement: "静止",
+      duration: 4,
+      characters: scene.characters || [],
+      dialogue: "",
+      props: [],
+      notes: "建立场景",
+      aiPrompt: "",
+      aiVideoPrompt: ""
+    });
+    if (scene.dialogues && scene.dialogues.length > 0) {
+      const config2 = DENSITY_CONFIG[densityMode] || DENSITY_CONFIG.standard;
+      scene.dialogues.forEach((dialogue, idx) => {
+        const fullDialogue = dialogue.lines || "";
+        const character = dialogue.character;
+        const dialogueChunks = splitLongDialogue(fullDialogue, config2.longDialogueThreshold);
+        dialogueChunks.forEach((chunk, chunkIdx) => {
+          const isFirst = idx === 0 && chunkIdx === 0;
+          allPanels.push({
+            id: generateId(),
+            panelNumber: panelNumber++,
+            sceneId: scene.id,
+            episodeNumber: scene.episodeNumber,
+            description: `${isFirst ? "近景" : "特写"}，${character}${dialogue.parenthetical ? `（${dialogue.parenthetical}）` : ""}说话，表情变化`,
+            shot: isFirst ? "近景" : "特写",
+            angle: "平视",
+            cameraMovement: "静止",
+            duration: Math.max(2, Math.ceil(chunk.length / 20)),
+            characters: [character],
+            dialogue: chunk,
+            props: [],
+            notes: dialogueChunks.length > 1 ? `对话 ${idx + 1}-${chunkIdx + 1}` : `对话 ${idx + 1}`,
+            aiPrompt: "",
+            aiVideoPrompt: ""
+          });
+        });
+      });
+    }
+    const config = DENSITY_CONFIG[densityMode] || DENSITY_CONFIG.standard;
+    if (actionLength > config.actionCharsPerPanel / 2) {
+      const actionParts = Math.ceil(actionLength / config.actionCharsPerPanel);
+      for (let i = 0; i < Math.min(actionParts, 3); i++) {
+        const actionText = (scene.action || "").substring(i * config.actionCharsPerPanel, (i + 1) * config.actionCharsPerPanel);
+        if (actionText.trim()) {
+          allPanels.push({
+            id: generateId(),
+            panelNumber: panelNumber++,
+            sceneId: scene.id,
+            episodeNumber: scene.episodeNumber,
+            description: `中景，${actionText}`,
+            shot: "中景",
+            angle: "平视",
+            cameraMovement: i === 0 ? "静止" : "跟",
+            duration: 3,
+            characters: scene.characters || [],
+            dialogue: "",
+            props: [],
+            notes: "动作描写",
+            aiPrompt: "",
+            aiVideoPrompt: ""
+          });
+        }
+      }
+    }
+  });
+  const filledPanels = allPanels.map((panel, index) => {
+    const matchedScene = scenes.find((s) => s.id === panel.sceneId);
+    const prevPanel = index > 0 ? allPanels[index - 1] : void 0;
+    const nextPanel = index < allPanels.length - 1 ? allPanels[index + 1] : void 0;
+    const filledPanel = smartFillPanel(panel, matchedScene, prevPanel, nextPanel, allPanels);
+    filledPanel.aiPrompt = generateStoryboardImagePrompt(filledPanel, characters, assetsScenes, directorStyle);
+    filledPanel.aiVideoPrompt = generateStoryboardVideoPrompt(filledPanel, characters, assetsScenes, directorStyle, prevPanel);
+    return filledPanel;
+  });
+  devLog(`[智能Fallback] 共生成 ${filledPanels.length} 个分镜（${scenes.length} 个场景）`);
+  return filledPanels;
+}
+const SHOT_CODE_TO_CN = {
+  "ECU": "大特写",
+  "CU": "特写",
+  "MCU": "近景",
+  "MS": "中景",
+  "MWS": "全景",
+  "WS": "远景",
+  "EWS": "大远景",
+  "POV": "中景",
+  "OTS": "中景",
+  "TWO": "中景",
+  "GROUP": "全景",
+  "INSERT": "特写"
+};
+const ANGLE_CODE_TO_CN = {
+  "EYE_LEVEL": "平视",
+  "HIGH": "俯视",
+  "LOW": "仰视",
+  "BIRDS_EYE": "俯视",
+  "WORMS_EYE": "仰视",
+  "DUTCH": "平视"
+};
+const MOVEMENT_CODE_TO_CN = {
+  "STATIC": "静止",
+  "PAN_L": "摇",
+  "PAN_R": "摇",
+  "TILT_UP": "摇",
+  "TILT_DOWN": "摇",
+  "DOLLY_IN": "推",
+  "DOLLY_OUT": "拉",
+  "TRACK_L": "移",
+  "TRACK_R": "移",
+  "CRANE_UP": "升降",
+  "CRANE_DOWN": "升降",
+  "ZOOM_IN": "推",
+  "ZOOM_OUT": "拉",
+  "HANDHELD": "移",
+  "STEADICAM": "移",
+  "FOLLOW": "跟",
+  "ARC": "环绕",
+  "WHIP": "摇"
+};
+async function extractStoryboard(scenes, characters = [], assetsScenes = [], densityMode = "standard", directorStyle) {
+  var _a;
+  const MAX_SCENES_FOR_AI = 15;
+  if (scenes.length > MAX_SCENES_FOR_AI) {
+    devLog(`[extractStoryboard] 场景数量 ${scenes.length} 超过限制 ${MAX_SCENES_FOR_AI}，直接使用智能 Fallback`);
+    return generateFallbackPanels(scenes, characters, assetsScenes, densityMode, directorStyle);
+  }
+  const scenesData = scenes.map((s) => {
+    var _a2;
+    return {
+      id: s.id,
+      sceneNumber: s.sceneNumber,
+      location: s.location,
+      timeOfDay: s.timeOfDay,
+      sceneType: s.sceneType,
+      action: s.action,
+      characters: s.characters,
+      dialogues: (_a2 = s.dialogues) == null ? void 0 : _a2.map((d) => {
+        var _a3;
+        return {
+          character: d.character,
+          lines: (_a3 = d.lines) == null ? void 0 : _a3.substring(0, 500)
+        };
+      }),
+      beat: s.beat,
+      specialSceneType: s.specialSceneType
+    };
+  });
+  const characterContext = characters.map((c) => `- ${c.name}: ${c.appearance || c.description}`).join("\n");
+  const sceneContext = assetsScenes.map((s) => `- ${s.name}: ${s.environment || s.description}`).join("\n");
+  const densityPrompt = ((_a = DENSITY_CONFIG[densityMode]) == null ? void 0 : _a.promptDescription) || DENSITY_CONFIG.standard.promptDescription;
+  const config = DENSITY_CONFIG[densityMode] || DENSITY_CONFIG.standard;
+  let estimatedTotal = 0;
+  scenes.forEach((scene) => {
+    var _a2;
+    const dialogueCount = ((_a2 = scene.dialogues) == null ? void 0 : _a2.length) || 0;
+    const actionLength = (scene.action || "").length;
+    estimatedTotal += config.basePerScene + Math.ceil(dialogueCount * config.panelsPerDialogue) + Math.ceil(actionLength / config.actionCharsPerPanel);
+  });
+  const prompt = `你是专业分镜设计师兼音效设计师，将剧本场景逐帧转换为精确的漫画分镜。
+
+【⚠️ 核心约束 - 必须严格遵守】
+1. **预估分镜数量：约 ${estimatedTotal} 个**，请确保生成数量接近此目标
+2. **🔴 每句对话必须生成独立分镜**：一句对白 = 一个分镜，不可合并！
+3. **每个场景开头必须有建立镜头**（远景/全景）
+4. **长动作描写（>50字）必须拆分为多个动作镜头**
+
+【密度要求】
+${densityPrompt}
+
+【角色与环境参考】
+${characterContext ? `角色描述：
+${characterContext}
+` : ""}
+${sceneContext ? `环境描述：
+${sceneContext}
+` : ""}
+${directorStyle ? `导演风格：${directorStyle.artStyle || ""}, 氛围: ${directorStyle.mood || ""}
+` : ""}
+
+【景别代码】ECU(大特写)/CU(特写)/MCU(近景)/MS(中景)/MWS(中全景)/WS(远景)/EWS(大远景)/POV(主观)/OTS(过肩)
+【角度代码】EYE_LEVEL(平视)/HIGH(俯视)/LOW(仰视)/DUTCH(倾斜)
+【运动代码】STATIC(静止)/PAN_L(左摇)/PAN_R(右摇)/DOLLY_IN(推)/DOLLY_OUT(拉)/TRACK_L(左移)/TRACK_R(右移)/FOLLOW(跟随)
+
+【JSON 格式】
+[{"sceneId":"场景ID","description":"画面描述（含光影）","shotSize":"MS","angle":"EYE_LEVEL","movementType":"STATIC","duration":3,"characters":["角色名"],"dialogue":"完整对白（如有）","soundEffects":["具体音效"],"music":"背景音乐","startFrame":"起始帧画面","endFrame":"结束帧画面","composition":"构图方式","shotIntent":"镜头意图","axisNote":"轴线备注","environmentMotion":"环境动态","characterActions":["角色名:动作"]}]
+
+【剧本场景】
+${JSON.stringify(scenesData)}
+`;
+  try {
+    const result = await callWithRetry(
+      () => callDeepSeek([{ role: "user", content: prompt }]),
+      3,
+      1e3
+    );
+    let shots = parseJSON(result);
+    if (!shots) shots = [];
+    if (!Array.isArray(shots)) {
+      if (shots.panels) shots = shots.panels;
+      else if (shots.shots) shots = shots.shots;
+      else if (shots.storyboard) shots = shots.storyboard;
+      else shots = [];
+    }
+    if (shots.length === 0) {
+      console.warn("extractStoryboard: no shots extracted, using smart fallback");
+      return generateFallbackPanels(scenes, characters, assetsScenes, densityMode, directorStyle);
+    }
+    const allPanels = shots.map((shot, index) => {
+      const matchedScene = scenes.find((s) => s.id === shot.sceneId) || scenes[Math.floor(index / 3)];
+      const rawShotSize = shot.shotSize || shot.shot || "MS";
+      const rawAngle = shot.angle || "EYE_LEVEL";
+      const rawMovement = shot.movementType || shot.cameraMovement || "STATIC";
+      return {
+        id: generateId(),
+        panelNumber: index + 1,
+        sceneId: (matchedScene == null ? void 0 : matchedScene.id) || generateId(),
+        episodeNumber: (matchedScene == null ? void 0 : matchedScene.episodeNumber) || 1,
+        description: shot.description || "",
+        dialogue: shot.dialogue || "",
+        shot: SHOT_CODE_TO_CN[rawShotSize] || "中景",
+        angle: ANGLE_CODE_TO_CN[rawAngle] || "平视",
+        cameraMovement: MOVEMENT_CODE_TO_CN[rawMovement] || "静止",
+        shotSize: rawShotSize,
+        cameraAngle: rawAngle,
+        movementType: rawMovement,
+        duration: shot.duration || 4,
+        characters: shot.characters || (matchedScene == null ? void 0 : matchedScene.characters) || [],
+        props: shot.props || [],
+        notes: shot.notes || "",
+        composition: shot.composition,
+        shotIntent: shot.shotIntent,
+        focusPoint: shot.focusPoint,
+        axisNote: shot.axisNote,
+        soundEffects: shot.soundEffects || [],
+        transition: shot.transition || "切至",
+        music: shot.music || "",
+        startFrame: shot.startFrame || "",
+        endFrame: shot.endFrame || "",
+        motionSpeed: shot.motionSpeed || "normal",
+        environmentMotion: shot.environmentMotion || "",
+        characterActions: shot.characterActions || [],
+        keyFrames: [],
+        _matchedScene: matchedScene
+      };
+    });
+    const processedPanels = allPanels.map((panelData, index) => {
+      const matchedScene = panelData._matchedScene;
+      delete panelData._matchedScene;
+      const prevPanel = index > 0 ? allPanels[index - 1] : void 0;
+      const nextPanel = index < allPanels.length - 1 ? allPanels[index + 1] : void 0;
+      const filledPanel = smartFillPanel(panelData, matchedScene, prevPanel, nextPanel, allPanels);
+      const imagePrompt = generateStoryboardImagePrompt(filledPanel, characters, assetsScenes, directorStyle);
+      const videoPrompt = generateStoryboardVideoPrompt(filledPanel, characters, assetsScenes, directorStyle, prevPanel);
+      const unknownChars = checkCharacterConsistency(filledPanel.characters || [], characters);
+      if (unknownChars.length > 0) {
+        console.warn(`[分镜${index + 1}] ⚠️ 未知角色: ${unknownChars.join(", ")}`);
+        filledPanel.notes = `${filledPanel.notes || ""} [警告: 未知角色 ${unknownChars.join(", ")}]`.trim();
+      }
+      filledPanel.aiPrompt = imagePrompt;
+      filledPanel.aiVideoPrompt = videoPrompt;
+      return filledPanel;
+    });
+    const coveredSceneIds = new Set(processedPanels.map((p) => p.sceneId));
+    const missingScenes = scenes.filter((s) => !coveredSceneIds.has(s.id));
+    if (missingScenes.length > 0) {
+      console.warn(`[extractStoryboard] ⚠️ AI 遗漏了 ${missingScenes.length} 个场景，使用 Fallback 补充`);
+      let panelNumber = processedPanels.length + 1;
+      const configForFallback = DENSITY_CONFIG[densityMode] || DENSITY_CONFIG.standard;
+      missingScenes.forEach((scene) => {
+        const establishingPanel = {
+          id: generateId(),
+          panelNumber: panelNumber++,
+          sceneId: scene.id,
+          episodeNumber: scene.episodeNumber,
+          description: `${scene.location || "场景"}，${scene.timeOfDay || "日"}。${(scene.action || "").substring(0, 80)}`,
+          shot: "远景",
+          angle: "平视",
+          cameraMovement: "静止",
+          duration: 4,
+          characters: scene.characters || [],
+          dialogue: "",
+          props: [],
+          notes: "建立场景（AI遗漏补充）",
+          aiPrompt: "",
+          aiVideoPrompt: "",
+          soundEffects: [],
+          music: "",
+          startFrame: "",
+          endFrame: "",
+          composition: "三分法",
+          shotIntent: "建立空间"
+        };
+        const filledEstablishing = smartFillPanel(establishingPanel, scene, void 0, void 0, processedPanels);
+        filledEstablishing.aiPrompt = generateStoryboardImagePrompt(filledEstablishing, characters, assetsScenes, directorStyle);
+        filledEstablishing.aiVideoPrompt = generateStoryboardVideoPrompt(filledEstablishing, characters, assetsScenes, directorStyle, void 0);
+        processedPanels.push(filledEstablishing);
+        if (scene.dialogues && scene.dialogues.length > 0) {
+          scene.dialogues.forEach((dialogue, idx) => {
+            const dialoguePanel = {
+              id: generateId(),
+              panelNumber: panelNumber++,
+              sceneId: scene.id,
+              episodeNumber: scene.episodeNumber,
+              description: `${idx === 0 ? "近景" : "特写"}，${dialogue.character}说话，表情变化`,
+              shot: idx === 0 ? "近景" : "特写",
+              angle: "平视",
+              cameraMovement: "静止",
+              duration: Math.max(2, Math.ceil((dialogue.lines || "").length / 20)),
+              characters: [dialogue.character],
+              dialogue: dialogue.lines || "",
+              props: [],
+              notes: `对话 ${idx + 1}（AI遗漏补充）`,
+              aiPrompt: "",
+              aiVideoPrompt: "",
+              soundEffects: [],
+              music: "",
+              startFrame: "",
+              endFrame: "",
+              composition: "三分法",
+              shotIntent: "展示情绪"
+            };
+            const filledDialogue = smartFillPanel(dialoguePanel, scene, void 0, void 0, processedPanels);
+            filledDialogue.aiPrompt = generateStoryboardImagePrompt(filledDialogue, characters, assetsScenes, directorStyle);
+            filledDialogue.aiVideoPrompt = generateStoryboardVideoPrompt(filledDialogue, characters, assetsScenes, directorStyle, void 0);
+            processedPanels.push(filledDialogue);
+          });
+        }
+        const actionLength = (scene.action || "").length;
+        if (actionLength > configForFallback.actionCharsPerPanel / 2) {
+          const actionParts = Math.ceil(actionLength / configForFallback.actionCharsPerPanel);
+          for (let i = 0; i < Math.min(actionParts, 3); i++) {
+            const actionText = (scene.action || "").substring(i * configForFallback.actionCharsPerPanel, (i + 1) * configForFallback.actionCharsPerPanel);
+            if (actionText.trim()) {
+              const actionPanel = {
+                id: generateId(),
+                panelNumber: panelNumber++,
+                sceneId: scene.id,
+                episodeNumber: scene.episodeNumber,
+                description: `中景，${actionText}`,
+                shot: "中景",
+                angle: "平视",
+                cameraMovement: i === 0 ? "静止" : "跟",
+                duration: 3,
+                characters: scene.characters || [],
+                dialogue: "",
+                props: [],
+                notes: "动作描写（AI遗漏补充）",
+                aiPrompt: "",
+                aiVideoPrompt: "",
+                soundEffects: [],
+                music: "",
+                startFrame: "",
+                endFrame: ""
+              };
+              const filledAction = smartFillPanel(actionPanel, scene, void 0, void 0, processedPanels);
+              filledAction.aiPrompt = generateStoryboardImagePrompt(filledAction, characters, assetsScenes, directorStyle);
+              filledAction.aiVideoPrompt = generateStoryboardVideoPrompt(filledAction, characters, assetsScenes, directorStyle, void 0);
+              processedPanels.push(filledAction);
+            }
+          }
+        }
+      });
+      console.log(`[extractStoryboard] ✅ 场景覆盖补充完成，共 ${processedPanels.length} 个分镜`);
+    }
+    return processedPanels;
+  } catch (error) {
+    console.error("DeepSeek extractStoryboard failed:", error);
+    throw new Error("AI 分镜生成失败");
+  }
+}
+const IMAGE_SIZES = {
+  // 角色图片
+  CHARACTER_FULL_BODY: "1920x1920",
+  // 1:1 正方形 (3,686,400 像素) ✓ 改用正方形避免边界问题
+  CHARACTER_FACE: "1920x1920",
+  // 1:1 正方形 (3,686,400 像素) ✓
+  // 场景图片
+  SCENE_WIDE: "2560x1440",
+  // 16:9 横图 (3,686,400 像素) ✓
+  SCENE_MEDIUM: "1920x1920",
+  // 1:1 正方形 (3,686,400 像素) ✓
+  SCENE_CLOSEUP: "1920x1920",
+  // 1:1 正方形 (3,686,400 像素) ✓
+  // 道具和服饰
+  PROP: "1920x1920",
+  // 1:1 正方形 (3,686,400 像素) ✓
+  COSTUME: "1600x2304",
+  // 接近 3:4 竖图 (3,686,400 像素) ✓
+  // 分镜图片（🆕 多尺寸支持）
+  STORYBOARD: "2560x1440",
+  // 16:9 横图 (3,686,400 像素) ✓ 默认
+  STORYBOARD_16_9: "2560x1440",
+  // 16:9 横屏电影
+  STORYBOARD_9_16: "1440x2560",
+  // 9:16 竖屏手机
+  STORYBOARD_1_1: "1920x1920",
+  // 1:1 方形社交
+  STORYBOARD_4_3: "2080x1560",
+  // 4:3 经典比例
+  STORYBOARD_21_9: "2940x1260"
+  // 21:9 超宽电影
+};
+async function generateStoryboardImage(panel, characters, scenes, directorStyle, enableOptimization = true, maxRetries = 3, imageSize) {
+  let imagePrompt = generateStoryboardImagePrompt(panel, characters, scenes, directorStyle);
+  if (enableOptimization) {
+    try {
+      imagePrompt = await optimizePrompt(
+        imagePrompt,
+        (directorStyle == null ? void 0 : directorStyle.artStyle) || "Cinematic",
+        "storyboard"
+      );
+    } catch (e) {
+      console.warn("Prompt optimization failed, using original", e);
+    }
+  }
+  let selectedSize = IMAGE_SIZES.STORYBOARD;
+  if (panel.aspectRatio) {
+    const aspectSizeMap = {
+      "16:9": IMAGE_SIZES.STORYBOARD_16_9,
+      "9:16": IMAGE_SIZES.STORYBOARD_9_16,
+      "1:1": IMAGE_SIZES.STORYBOARD_1_1,
+      "4:3": IMAGE_SIZES.STORYBOARD_4_3,
+      "21:9": IMAGE_SIZES.STORYBOARD_21_9
+    };
+    selectedSize = aspectSizeMap[panel.aspectRatio] || IMAGE_SIZES.STORYBOARD;
+  }
+  let lastError = null;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`[图片生成] 第 ${attempt}/${maxRetries} 次尝试，尺寸: ${selectedSize}...`);
+      return await callDoubaoImage(imagePrompt, selectedSize, directorStyle == null ? void 0 : directorStyle.negativePrompt);
+    } catch (error) {
+      lastError = error;
+      console.warn(`[图片生成] 第 ${attempt} 次失败:`, error);
+      if (attempt < maxRetries) {
+        const delay2 = 1e3 * attempt;
+        console.log(`[图片生成] ${delay2}ms 后重试...`);
+        await new Promise((resolve) => setTimeout(resolve, delay2));
+      }
+    }
+  }
+  console.error("[图片生成] 所有重试均失败:", lastError);
+  return `https://placehold.co/1024x576?text=${encodeURIComponent("AI生成失败（已重试" + maxRetries + "次）")}`;
+}
 const NEGATIVE_PROMPTS = {
   general: "low quality, worst quality, blurry, out of focus, bad art, ugly, watermark, signature, text",
   character: "deformed, bad anatomy, disfigured, poorly drawn face, mutation, extra limbs, bad proportions, missing arms, missing legs, extra arms, extra legs, fused fingers, too many fingers",
@@ -8548,1344 +9708,6 @@ class PromptEngine {
       metadata
     };
   }
-}
-const DENSITY_CONFIG = {
-  compact: {
-    basePerScene: 0.8,
-    // 🆕 进一步降低
-    panelsPerDialogue: 0.4,
-    actionCharsPerPanel: 400,
-    // 每400字1镜
-    minPerScene: 1,
-    maxPerScene: 3,
-    longDialogueThreshold: 150,
-    addReactionShots: false,
-    estimateMultiplier: 0.6,
-    promptDescription: "分镜密度：精简模式。每个场景生成约 1-2 个核心分镜。"
-  },
-  standard: {
-    basePerScene: 0.7,
-    // 🆕 降低：AI 约每场景1.5镜
-    panelsPerDialogue: 0.6,
-    // 🆕 降低
-    actionCharsPerPanel: 200,
-    // 🆕 增大：每200字1镜
-    minPerScene: 1,
-    maxPerScene: 5,
-    longDialogueThreshold: 100,
-    addReactionShots: false,
-    estimateMultiplier: 1,
-    promptDescription: "分镜密度：标准模式。每个场景生成约 1-3 个分镜。"
-  },
-  detailed: {
-    basePerScene: 1.5,
-    // 🆕 降低
-    panelsPerDialogue: 1,
-    actionCharsPerPanel: 100,
-    minPerScene: 3,
-    maxPerScene: 8,
-    longDialogueThreshold: 80,
-    addReactionShots: true,
-    estimateMultiplier: 1.4,
-    promptDescription: "分镜密度：详细模式。每个场景生成约 3-6 个分镜。"
-  }
-};
-function estimatePanelCount(dialogueCount, actionLength, characterCount, mode) {
-  const config = DENSITY_CONFIG[mode];
-  let baseCount = config.basePerScene;
-  const dialoguePanels = dialogueCount * config.panelsPerDialogue;
-  const actionPanels = Math.ceil(actionLength / config.actionCharsPerPanel);
-  const reactionBonus = config.addReactionShots && characterCount >= 2 && dialogueCount >= 2 ? Math.floor(dialogueCount * 0.3) : 0;
-  const total = baseCount + dialoguePanels + actionPanels + reactionBonus;
-  const rawMin = Math.floor(total * 0.8);
-  const rawMax = Math.ceil(total * 1.2);
-  const constrainedMin = Math.max(config.minPerScene, rawMin);
-  const constrainedMax = Math.max(constrainedMin, Math.min(config.maxPerScene, rawMax));
-  return {
-    min: constrainedMin,
-    max: constrainedMax
-  };
-}
-function splitLongDialogue(dialogue, threshold = 100) {
-  if (!dialogue || dialogue.length <= threshold) {
-    return [dialogue];
-  }
-  const chunks = [];
-  const sentences = dialogue.split(/([。！？!?…]+)/);
-  let current = "";
-  for (let i = 0; i < sentences.length; i++) {
-    const part = sentences[i];
-    if ((current + part).length <= threshold) {
-      current += part;
-    } else {
-      if (current.trim()) chunks.push(current.trim());
-      current = part;
-    }
-  }
-  if (current.trim()) chunks.push(current.trim());
-  return chunks.filter((c) => c.length > 0);
-}
-const devLog = (...args) => {
-};
-async function callWithRetry(fn, maxRetries = 3, baseDelay = 1e3) {
-  let lastError = null;
-  for (let i = 0; i < maxRetries; i++) {
-    try {
-      return await fn();
-    } catch (e) {
-      lastError = e;
-      console.warn(`[重试机制] 第 ${i + 1} 次调用失败，${i < maxRetries - 1 ? `${baseDelay * Math.pow(2, i)}ms 后重试` : "已达最大重试次数"}`);
-      if (i < maxRetries - 1) {
-        await new Promise((resolve) => setTimeout(resolve, baseDelay * Math.pow(2, i)));
-      }
-    }
-  }
-  throw lastError || new Error("未知错误");
-}
-function checkCharacterConsistency(panelCharacters, assetCharacters) {
-  if (!panelCharacters || panelCharacters.length === 0) return [];
-  const knownNames = new Set(assetCharacters.map((c) => c.name));
-  return panelCharacters.filter((name) => !knownNames.has(name));
-}
-const MODE_DESCRIPTIONS = {
-  movie: "电影剧本，标准三幕或四幕结构，场景较长，注重视觉叙事",
-  tv_drama: "电视剧剧本，每集约45分钟，有明确的集数划分和幕间高潮",
-  short_video: "短视频剧本，3分钟以内，节奏快，开场即高潮",
-  web_series: "网络剧剧本，每集10-20分钟，注重悬念和钩子"
-};
-async function extractScript(originalText, mode = "tv_drama", directorStyle) {
-  const modeDesc = MODE_DESCRIPTIONS[mode];
-  let styleHint = "";
-  if (directorStyle) {
-    const hints = [];
-    if (directorStyle.artStyle) {
-      if (directorStyle.artStyle.includes("赛博") || directorStyle.artStyle.includes("科幻")) {
-        hints.push("对白风格：简洁干练，带有科技感和未来感");
-      } else if (directorStyle.artStyle.includes("港片") || directorStyle.artStyle.includes("复古")) {
-        hints.push("对白风格：干脆利落，经典港片风格，可适当使用经典台词结构");
-      } else if (directorStyle.artStyle.includes("日系") || directorStyle.artStyle.includes("动画")) {
-        hints.push("对白风格：情感细腻，可适当使用内心独白强化情感");
-      }
-    }
-    if (directorStyle.mood) {
-      hints.push(`整体氛围：${directorStyle.mood}`);
-    }
-    if (hints.length > 0) {
-      styleHint = `
-
-【导演风格提示】
-${hints.join("\n")}`;
-    }
-  }
-  const prompt = `你是一位拥有20年经验的专业编剧。请将以下文本改编为标准影视剧本格式。
-
-【剧本类型】${modeDesc}${styleHint}
-
-【输出规范】
-1. 场景行格式：场景号. 内/外景. 地点 - 时间
-2. 动作描述：现在时态，第三人称，简洁有力，视觉化表达
-3. 角色首次出场：标记 isFirstAppearance=true，并提供简短外貌描述
-4. 对白标记：
-   - V.O. = 画外音（角色在画外说话）
-   - O.S. = 场外音（角色在场景中但不在画面内）
-   - CONT'D = 延续对白（同一角色连续说话被动作打断后继续）
-5. 括号指示：仅用于必要的表演提示，如"（轻声地）"、"（怒视）"
-
-【专业技巧】
-- 每个场景应有明确的戏剧目的（推进剧情/揭示角色/制造冲突）
-- 删除冗余的叙述性语言，只保留可视化内容
-- 对白应自然、口语化，符合角色性格
-- 适当添加转场指示（切至、淡出、溶至等）
-- 估算每个场景的时长（秒）
-
-【特殊场景类型】
-- FLASHBACK: 闪回
-- MONTAGE: 蒙太奇
-- INSERT: 插入镜头
-- INTERCUT: 交叉剪辑
-
-请严格按照以下 JSON 格式返回，不要包含 Markdown 格式标记：
-[
-  {
-    "sceneNumber": 1,
-    "episodeNumber": 1,
-    "location": "场景地点",
-    "subLocation": "子场景（可选）",
-    "timeOfDay": "白天/夜晚/黄昏/清晨",
-    "sceneType": "INT/EXT",
-    "continuity": "CONTINUOUS/LATER/SAME（可选）",
-    "specialSceneType": "FLASHBACK/MONTAGE/INSERT（可选）",
-    "action": "动作描述，现在时态，视觉化表达",
-    "beat": "情绪节拍（可选，如：紧张升级、情感爆发）",
-    "transition": "切至/淡出/溶至（可选）",
-    "estimatedDuration": 30,
-    "characters": ["角色A", "角色B"],
-    "dialogues": [
-      {
-        "character": "角色A",
-        "extension": "V.O./O.S.（可选）",
-        "parenthetical": "表演提示（可选）",
-        "lines": "台词内容",
-        "isFirstAppearance": true/false,
-        "isContinued": false
-      }
-    ],
-    "notes": "编剧备注（可选）"
-  }
-]
-
-文本内容：
-${originalText.substring(0, 15e3)}
-`;
-  try {
-    const result = await callDeepSeek([{ role: "user", content: prompt }]);
-    const scenes = parseJSON(result);
-    return scenes.map((s, index) => ({
-      id: generateId(),
-      sceneNumber: s.sceneNumber || index + 1,
-      episodeNumber: s.episodeNumber || 1,
-      location: s.location || "未知场景",
-      subLocation: s.subLocation,
-      timeOfDay: s.timeOfDay || "白天",
-      sceneType: s.sceneType || "INT",
-      continuity: s.continuity,
-      specialSceneType: s.specialSceneType,
-      dayNightNumber: s.dayNightNumber,
-      characters: s.characters || [],
-      action: s.action || "",
-      beat: s.beat,
-      dialogues: (s.dialogues || []).map((d) => ({
-        id: generateId(),
-        character: d.character,
-        extension: d.extension,
-        parenthetical: d.parenthetical,
-        lines: d.lines,
-        isFirstAppearance: d.isFirstAppearance || false,
-        isContinued: d.isContinued || false,
-        dual: d.dual
-      })),
-      transition: s.transition,
-      estimatedDuration: s.estimatedDuration || 15,
-      notes: s.notes
-    }));
-  } catch (error) {
-    console.error("DeepSeek extractScript failed:", error);
-    throw new Error("AI 剧本生成失败，请检查网络或 Key");
-  }
-}
-function smartFillPanel(panel, scene, prevPanel, nextPanel, allPanels) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
-  const desc = (panel.description || "").toLowerCase();
-  const location = ((scene == null ? void 0 : scene.location) || "").toLowerCase();
-  const beat = (scene == null ? void 0 : scene.beat) || "";
-  const mood = (panel.atmosphere || panel.emotionalBeat || beat || "").toUpperCase();
-  if (prevPanel && prevPanel.endFrame && (!panel.startFrame || panel.startFrame === "")) {
-    panel.startFrame = `承接上一镜：${prevPanel.endFrame}`;
-  }
-  if (allPanels && allPanels.length > 0 && (!panel.music || panel.music === "")) {
-    const sameScenePanels = allPanels.filter((p) => p.sceneId === panel.sceneId && p.music);
-    if (sameScenePanels.length > 0) {
-      panel.music = sameScenePanels[0].music;
-    }
-  }
-  if (allPanels && allPanels.length > 0 && (!panel.colorGrade || panel.colorGrade === "" || panel.colorGrade === "自然调色")) {
-    const sameEpisodePanels = allPanels.filter((p) => p.episodeNumber === panel.episodeNumber && p.colorGrade && p.colorGrade !== "自然调色");
-    if (sameEpisodePanels.length > 0) {
-      panel.colorGrade = sameEpisodePanels[0].colorGrade;
-    }
-  }
-  if (!panel.soundEffects || panel.soundEffects.length === 0) {
-    const soundEffects = [];
-    if (location.includes("战斗") || desc.includes("打斗") || desc.includes("击")) {
-      soundEffects.push(...SOUND_PRESETS["战斗"]);
-    } else if (location.includes("雨") || desc.includes("下雨")) {
-      soundEffects.push(...SOUND_PRESETS["雨景"]);
-    } else if (location.includes("森") || location.includes("山") || location.includes("野")) {
-      soundEffects.push(...SOUND_PRESETS["森林"]);
-    } else if (location.includes("市") || location.includes("街") || location.includes("路")) {
-      soundEffects.push(...SOUND_PRESETS["城市环境"]);
-    } else if (location.includes("海") || location.includes("水") || location.includes("湖")) {
-      soundEffects.push(...SOUND_PRESETS["水边"]);
-    } else if (location.includes("科幻") || location.includes("机械") || location.includes("船")) {
-      soundEffects.push(...SOUND_PRESETS["科幻/机械"]);
-    } else {
-      soundEffects.push("环境背景音");
-    }
-    if (desc.includes("脚步") || desc.includes("走") || desc.includes("跑")) {
-      soundEffects.push("规律脚步声");
-    }
-    if (desc.includes("门") || desc.includes("开") || desc.includes("关")) {
-      soundEffects.push("木门转轴声");
-    }
-    if (desc.includes("说") || desc.includes("喊") || panel.dialogue) {
-      soundEffects.push("清晰人声对白");
-    }
-    panel.soundEffects = [...new Set(soundEffects)].slice(0, 3);
-  }
-  if (!panel.music || panel.music === "背景音乐") {
-    if (mood.includes("TENSE") || mood.includes("紧张") || mood.includes("危险")) {
-      panel.music = MUSIC_PRESETS["紧张"][0];
-    } else if (mood.includes("ROMANTIC") || mood.includes("浪漫") || mood.includes("温馨")) {
-      panel.music = MUSIC_PRESETS["浪漫"][0];
-    } else if (mood.includes("SAD") || mood.includes("悲伤") || mood.includes("忧郁")) {
-      panel.music = MUSIC_PRESETS["悲伤"][0];
-    } else if (mood.includes("HAPPY") || mood.includes("欢快") || mood.includes("轻松")) {
-      panel.music = MUSIC_PRESETS["欢快"][0];
-    } else if (mood.includes("ACTION") || mood.includes("动作") || mood.includes("热血")) {
-      panel.music = MUSIC_PRESETS["热血"][0];
-    } else if (location.includes("古") || location.includes("武侠") || location.includes("庙")) {
-      panel.music = MUSIC_PRESETS["古风"][0];
-    } else {
-      panel.music = "通用叙事背景音乐";
-    }
-  }
-  if (!panel.cameraMovement || panel.cameraMovement === "静止") {
-    const prevMovement = (prevPanel == null ? void 0 : prevPanel.cameraMovement) || "";
-    const nextHasDialogue = (nextPanel == null ? void 0 : nextPanel.dialogue) && nextPanel.dialogue.length > 10;
-    const isSceneStart = panel.panelNumber === 1 || panel.sceneId !== (prevPanel == null ? void 0 : prevPanel.sceneId);
-    const isSceneEnd = nextPanel && panel.sceneId !== nextPanel.sceneId;
-    const getCoherentMovement = () => {
-      if (isSceneStart) return "静止";
-      if (isSceneEnd) return "抽离后拉";
-      if (nextHasDialogue) return "静止";
-      if (prevMovement === "聚焦推进" || prevMovement === "爆发急推" || prevMovement.includes("推")) {
-        return "静止";
-      }
-      if (prevMovement === "抽离后拉" || prevMovement.includes("拉")) {
-        return "聚焦推进";
-      }
-      if (prevMovement === "静止" || prevMovement === "") {
-        if (mood.includes("TENSE") || mood.includes("ANGRY")) return "爆发急推";
-        if (mood.includes("SAD") || mood.includes("LONELY")) return "压抑下降";
-        if (mood.includes("REVEAL")) return "升华上升";
-        return "陪伴平移";
-      }
-      return "静止";
-    };
-    if (mood.includes("TENSE") || mood.includes("ANGRY")) {
-      panel.cameraMovement = isSceneStart ? "静止" : "手持抖动";
-    } else if (mood.includes("SAD") || mood.includes("LONELY")) {
-      panel.cameraMovement = getCoherentMovement();
-    } else if (mood.includes("MYSTERY") || mood.includes("SUSPENSE")) {
-      panel.cameraMovement = "探索横摇";
-    } else if (mood.includes("REVEAL") || mood.includes("SUBLIME")) {
-      panel.cameraMovement = isSceneEnd ? "抽离后拉" : "升华上升";
-    } else if (mood.includes("ROMANTIC") || mood.includes("CALM")) {
-      panel.cameraMovement = "陪伴平移";
-    } else if (mood.includes("ACTION") || mood.includes("CHASE")) {
-      panel.cameraMovement = "跟";
-    } else if (panel.dialogue && panel.dialogue.length > 20) {
-      panel.cameraMovement = "静止";
-    } else {
-      panel.cameraMovement = getCoherentMovement();
-    }
-  }
-  if (!panel.startFrame || panel.startFrame === "静止画面") {
-    const chars = ((_a = panel.characters) == null ? void 0 : _a.join("、")) || "主体";
-    const movement = panel.movementType || panel.cameraMovement || "静止";
-    if (movement === "DOLLY_IN" || movement === "推" || movement === "聚焦推进" || movement === "爆发急推") {
-      panel.startFrame = `${chars}处于全景构图中心`;
-      panel.endFrame = `${chars}面部特写，表情细节清晰`;
-    } else if (movement === "DOLLY_OUT" || movement === "拉" || movement === "抽离后拉" || movement === "爆发急拉") {
-      panel.startFrame = `${chars}近景特写`;
-      panel.endFrame = `${chars}在广阔远景中显得渺小`;
-    } else if (movement === "FOLLOW" || movement === "跟" || movement === "陪伴平移") {
-      panel.startFrame = `${chars}开始侧向/正向移动`;
-      panel.endFrame = `保持与${chars}同步高度的动态跟随`;
-    } else if (movement === "PAN_L" || movement === "PAN_R" || movement === "探索横摇") {
-      panel.startFrame = `场景边缘起始点，${chars}尚未入画`;
-      panel.endFrame = `横移扫过场景，${chars}出现在黄金分割点`;
-    } else if (panel.dialogue) {
-      panel.startFrame = `${chars}开口瞬间的气息捕捉`;
-      panel.endFrame = `${chars}说完对白后的微表情收尾`;
-    } else {
-      panel.startFrame = `${chars}处于画面稳定构图位置`;
-      panel.endFrame = `画面保持稳定，光影微动`;
-    }
-  }
-  if (!panel.transition || panel.transition === "切至") {
-    if (desc.includes("回忆") || desc.includes("过去")) {
-      panel.transition = "溶至";
-    } else if (desc.includes("惊醒") || desc.includes("突变")) {
-      panel.transition = "闪白";
-    } else if (desc.includes("落幕") || desc.includes("结束")) {
-      panel.transition = "淡出";
-    }
-  }
-  if (!panel.motionSpeed || panel.motionSpeed === "normal") {
-    if (mood.includes("TENSE") || mood.includes("ACTION")) {
-      panel.motionSpeed = "fast";
-    } else if (mood.includes("CALM") || mood.includes("SAD")) {
-      panel.motionSpeed = "slow";
-    }
-  }
-  const shotSize = panel.shotSize || panel.shot || "MS";
-  if (!panel.lens) {
-    if (shotSize === "ECU" || shotSize === "大特写") {
-      panel.lens = "100mm macro";
-      panel.fStop = "f/2.8";
-      panel.depthOfField = "SHALLOW";
-    } else if (shotSize === "CU" || shotSize === "特写") {
-      panel.lens = "85mm";
-      panel.fStop = "f/2";
-      panel.depthOfField = "SHALLOW";
-    } else if (shotSize === "MCU" || shotSize === "近景") {
-      panel.lens = "50mm";
-      panel.fStop = "f/2.8";
-      panel.depthOfField = "SHALLOW";
-    } else if (shotSize === "MS" || shotSize === "中景") {
-      panel.lens = "50mm";
-      panel.fStop = "f/4";
-      panel.depthOfField = "NORMAL";
-    } else if (shotSize === "MWS" || shotSize === "中全景") {
-      panel.lens = "35mm";
-      panel.fStop = "f/5.6";
-      panel.depthOfField = "NORMAL";
-    } else if (shotSize === "WS" || shotSize === "全景" || shotSize === "远景") {
-      panel.lens = "24mm";
-      panel.fStop = "f/8";
-      panel.depthOfField = "DEEP";
-    } else if (shotSize === "EWS" || shotSize === "大远景") {
-      panel.lens = "16mm";
-      panel.fStop = "f/11";
-      panel.depthOfField = "DEEP";
-    } else {
-      panel.lens = "50mm";
-      panel.fStop = "f/4";
-      panel.depthOfField = "NORMAL";
-    }
-  }
-  if (!panel.lighting || !panel.lighting.mood) {
-    panel.lighting = panel.lighting || {};
-    if (mood.includes("TENSE") || mood.includes("紧张") || mood.includes("SUSPENSE")) {
-      panel.lighting.mood = "低调光影，高反差";
-      panel.lighting.keyLight = "侧光为主，形成明暗对比";
-    } else if (mood.includes("ROMANTIC") || mood.includes("浪漫") || mood.includes("温馨")) {
-      panel.lighting.mood = "柔和暖光，高调氛围";
-      panel.lighting.keyLight = "柔光正面，轮廓光勾边";
-    } else if (mood.includes("SAD") || mood.includes("悲伤") || mood.includes("忧郁")) {
-      panel.lighting.mood = "冷色调，低饱和";
-      panel.lighting.keyLight = "顶光或逆光，形成剪影";
-    } else if (mood.includes("ACTION") || mood.includes("动作") || mood.includes("热血")) {
-      panel.lighting.mood = "高对比，动态光效";
-      panel.lighting.keyLight = "硬光为主，强调立体";
-    } else if (location.includes("夜") || location.includes("晚")) {
-      panel.lighting.mood = "夜景氛围，点光源为主";
-      panel.lighting.keyLight = "实景光源（路灯/月光）";
-      panel.lighting.practicalLights = ["城市灯光", "月光"];
-    } else if (location.includes("日") || location.includes("白天")) {
-      panel.lighting.mood = "自然日光，通透明亮";
-      panel.lighting.keyLight = "太阳光为主光";
-    } else {
-      panel.lighting.mood = "自然光影";
-    }
-  }
-  if (!panel.props || panel.props.length === 0) {
-    const propsExtracted = [];
-    const propKeywords = ["剑", "刀", "枪", "书", "杯", "碗", "椅", "桌", "门", "窗", "灯", "镜", "笔", "纸", "信", "手机", "电脑", "车", "包", "伞", "钥匙", "戒指", "项链", "眼镜", "帽子", "花", "酒", "药", "钱", "地图", "照片"];
-    for (const keyword of propKeywords) {
-      if (desc.includes(keyword)) {
-        propsExtracted.push(keyword);
-      }
-    }
-    if (propsExtracted.length > 0) {
-      panel.props = propsExtracted.slice(0, 5);
-    }
-  }
-  if (!panel.vfx || panel.vfx.length === 0) {
-    const vfxList = [];
-    if (desc.includes("爆炸") || desc.includes("火")) {
-      vfxList.push("火焰特效", "烟尘粒子");
-    }
-    if (desc.includes("魔法") || desc.includes("法术") || desc.includes("能量")) {
-      vfxList.push("魔法光效", "能量波动");
-    }
-    if (desc.includes("雨") || desc.includes("雪")) {
-      vfxList.push("天气粒子系统");
-    }
-    if (desc.includes("闪电") || desc.includes("电")) {
-      vfxList.push("闪电特效");
-    }
-    if (desc.includes("模糊") || desc.includes("慢动作")) {
-      vfxList.push("运动模糊");
-    }
-    if (vfxList.length > 0) {
-      panel.vfx = vfxList;
-    }
-  }
-  if (!panel.colorGrade) {
-    if (mood.includes("TENSE") || mood.includes("紧张")) {
-      panel.colorGrade = "冷调蓝绿，去饱和";
-    } else if (mood.includes("ROMANTIC") || mood.includes("浪漫")) {
-      panel.colorGrade = "暖调橙黄，柔化高光";
-    } else if (mood.includes("SAD") || mood.includes("悲伤")) {
-      panel.colorGrade = "低饱和蓝灰，压暗中间调";
-    } else if (mood.includes("ACTION") || mood.includes("热血")) {
-      panel.colorGrade = "高对比橙蓝色调";
-    } else if (location.includes("古") || location.includes("武侠")) {
-      panel.colorGrade = "复古暖黄，略微去饱和";
-    } else {
-      panel.colorGrade = "自然调色";
-    }
-  }
-  if (!panel.setupShot) {
-    const idx = panel.panelNumber || 1;
-    if (((_b = panel.composition) == null ? void 0 : _b.includes("居右")) || ((_c = panel.composition) == null ? void 0 : _c.includes("左侧"))) {
-      panel.setupShot = "A机位";
-    } else if (((_d = panel.composition) == null ? void 0 : _d.includes("居左")) || ((_e = panel.composition) == null ? void 0 : _e.includes("右侧"))) {
-      panel.setupShot = "B机位";
-    } else if (idx % 2 === 1) {
-      panel.setupShot = "A机位";
-    } else {
-      panel.setupShot = "B机位";
-    }
-  }
-  if (!panel.axisNote) {
-    const charCount = ((_f = panel.characters) == null ? void 0 : _f.length) || 0;
-    const prevChars = (prevPanel == null ? void 0 : prevPanel.characters) || [];
-    const sameChars = ((_g = panel.characters) == null ? void 0 : _g.filter((c) => prevChars.includes(c))) || [];
-    const isSceneChange = panel.sceneId !== (prevPanel == null ? void 0 : prevPanel.sceneId);
-    if (isSceneChange) {
-      panel.axisNote = "新场景，重新建立轴线";
-    } else if (charCount >= 3) {
-      panel.axisNote = "群戏场景，建立主轴后保持一致";
-    } else if (panel.dialogue && charCount >= 2) {
-      panel.axisNote = "保持180°轴线，正反打切换";
-    } else if (sameChars.length > 0 && charCount <= 2) {
-      panel.axisNote = `延续上一镜轴线，${sameChars[0]}位置保持`;
-    } else if (panel.cameraMovement === "跟" || panel.movementType === "FOLLOW") {
-      panel.axisNote = "动态轴线，随角色移动";
-    } else if (charCount === 1) {
-      panel.axisNote = "单人镜头，注意与前后镜头朝向一致";
-    } else {
-      panel.axisNote = "保持轴线";
-    }
-  }
-  if (!panel.composition) {
-    const shotSize2 = panel.shotSize || panel.shot || "";
-    if (desc.includes("窗") || desc.includes("门框") || desc.includes("拱门") || desc.includes("走廊尽头")) {
-      panel.composition = "框架构图，人物被门窗框住";
-    } else if (desc.includes("道路") || desc.includes("走廊") || desc.includes("隧道") || desc.includes("铁轨")) {
-      panel.composition = "引导线构图，纵深延伸";
-    } else if (desc.includes("镜子") || desc.includes("水面倒影") || desc.includes("对称")) {
-      panel.composition = "对称/反射构图";
-    } else if (desc.includes("背影") || desc.includes("剪影") || desc.includes("逆光")) {
-      panel.composition = "轮廓构图，强调形态";
-    } else if (desc.includes("俯瞰") || desc.includes("鸟瞰") || desc.includes("从上往下")) {
-      panel.composition = "俯视构图，展示空间关系";
-    } else if (desc.includes("仰望") || desc.includes("从下往上") || desc.includes("高耸")) {
-      panel.composition = "仰视构图，强调威严/渺小";
-    } else if (desc.includes("角落") || desc.includes("边缘") || desc.includes("靠窗")) {
-      panel.composition = "负空间构图，主体偏侧留白";
-    } else if (desc.includes("人群") || desc.includes("围观") || desc.includes("中心")) {
-      panel.composition = "中心放射构图";
-    } else if (shotSize2 === "WS" || shotSize2 === "EWS" || shotSize2 === "远景" || shotSize2 === "大远景") {
-      panel.composition = "三分法构图，环境占2/3";
-    } else if (shotSize2 === "OTS" || panel.dialogue) {
-      panel.composition = "过肩构图，主体偏一侧";
-    } else if (((_h = panel.characters) == null ? void 0 : _h.length) >= 2) {
-      panel.composition = "对称构图，双人居中";
-    } else if (shotSize2 === "CU" || shotSize2 === "ECU" || shotSize2 === "特写") {
-      panel.composition = "中心构图，人物居中";
-    } else {
-      panel.composition = "三分法构图";
-    }
-  }
-  if (!panel.shotIntent) {
-    const shotSize2 = panel.shotSize || panel.shot || "";
-    if (shotSize2 === "WS" || shotSize2 === "EWS" || shotSize2 === "远景") {
-      panel.shotIntent = "建立空间，交代环境";
-    } else if (panel.dialogue) {
-      panel.shotIntent = "展示对话，传递信息";
-    } else if (shotSize2 === "CU" || shotSize2 === "ECU" || shotSize2 === "特写") {
-      panel.shotIntent = "揭示细节，强调情绪";
-    } else if (mood.includes("TENSE") || mood.includes("紧张")) {
-      panel.shotIntent = "制造紧张，推进冲突";
-    } else if (mood.includes("REVEAL")) {
-      panel.shotIntent = "揭示人物，引发好奇";
-    } else if (panel.panelNumber <= 2) {
-      panel.shotIntent = "开场建立，吸引注意";
-    } else {
-      panel.shotIntent = "推进叙事";
-    }
-  }
-  if (!panel.environmentMotion) {
-    const timeOfDay = ((scene == null ? void 0 : scene.timeOfDay) || "").toLowerCase();
-    const TIME_ENVIRONMENT_MAP = {
-      "清晨": "晨雾弥漫，露水滴落",
-      "早晨": "阳光渐强，鸟鸣阵阵",
-      "黄昏": "夕阳余晖，天色渐暗",
-      "傍晚": "霞光万道，影子拉长",
-      "深夜": "月光摇曳，虫鸣阵阵",
-      "夜晚": "灯光点点，夜色朦胧",
-      "正午": "阳光直射，影子短小",
-      "午后": "阳光斜照，微风轻拂"
-    };
-    if (location.includes("雨") || desc.includes("下雨") || desc.includes("暴雨")) {
-      panel.environmentMotion = "雨水滴落，水花飞溅";
-    } else if (location.includes("雪") || desc.includes("下雪") || desc.includes("飘雪")) {
-      panel.environmentMotion = "雪花飘落，白雪皑皑";
-    } else if (location.includes("风") || desc.includes("狂风") || desc.includes("大风")) {
-      panel.environmentMotion = "狂风呼啸，尘土飞扬";
-    } else if (location.includes("风") || desc.includes("微风") || desc.includes("风")) {
-      panel.environmentMotion = "微风轻拂，衣袂飘动";
-    } else if (location.includes("海") || location.includes("港")) {
-      panel.environmentMotion = "海浪拍岸，海鸥盘旋";
-    } else if (location.includes("河") || location.includes("溪") || location.includes("水")) {
-      panel.environmentMotion = "水波涟漪，倒影摇曳";
-    } else if (location.includes("森") || location.includes("林") || location.includes("树")) {
-      panel.environmentMotion = "树叶轻摇，光影斑驳";
-    } else if (location.includes("火") || desc.includes("火焰") || desc.includes("篝火")) {
-      panel.environmentMotion = "火焰跳动，烟雾升腾";
-    } else if (location.includes("市") || location.includes("街") || location.includes("道")) {
-      panel.environmentMotion = "行人走动，车辆穿梭";
-    } else if (location.includes("酒") || location.includes("餐") || location.includes("咖啡")) {
-      panel.environmentMotion = "人声鼎沸，杯盏交错";
-    } else if (location.includes("工厂") || location.includes("车间")) {
-      panel.environmentMotion = "机器运转，蒸汽喷涌";
-    } else {
-      let matched = false;
-      for (const [key, value] of Object.entries(TIME_ENVIRONMENT_MAP)) {
-        if (timeOfDay.includes(key) || location.includes(key)) {
-          panel.environmentMotion = value;
-          matched = true;
-          break;
-        }
-      }
-      if (!matched) {
-        panel.environmentMotion = "环境平静，光影自然";
-      }
-    }
-  }
-  if (!panel.characterActions || panel.characterActions.length === 0) {
-    const actions = [];
-    const ACTION_PATTERNS = [
-      // 表情动作
-      "皱眉",
-      "微笑",
-      "大笑",
-      "哭泣",
-      "叹息",
-      "惊讶",
-      "愤怒",
-      "沉思",
-      "凝视",
-      "闭眼",
-      // 肢体动作
-      "转身",
-      "点头",
-      "摇头",
-      "挥手",
-      "握手",
-      "拥抱",
-      "推开",
-      "拉住",
-      "低头",
-      "抬头",
-      "起身",
-      "坐下",
-      "躺下",
-      "跪下",
-      "弯腰",
-      "伸手",
-      "缩手",
-      "跺脚",
-      "踱步",
-      // 移动动作
-      "走向",
-      "走过",
-      "跑向",
-      "冲向",
-      "逃离",
-      "靠近",
-      "后退",
-      "绕过",
-      "跳起",
-      "踏入",
-      // 交互动作
-      "拿起",
-      "放下",
-      "打开",
-      "关上",
-      "翻开",
-      "撕毁",
-      "扔掉",
-      "接住",
-      "推门",
-      "敲门",
-      // 说话相关
-      "说道",
-      "喊道",
-      "低语",
-      "怒吼",
-      "呢喃",
-      "询问",
-      "回答",
-      "解释",
-      "命令",
-      "恳求"
-    ];
-    if (panel.characters && panel.characters.length > 0) {
-      for (let i = 0; i < Math.min(panel.characters.length, 3); i++) {
-        const char = panel.characters[i];
-        const charFound = [];
-        for (const action of ACTION_PATTERNS) {
-          if (desc.includes(`${char}${action}`) || desc.includes(`${char} ${action}`)) {
-            charFound.push(`${char}:${action}`);
-          } else if (desc.includes(action) && i === 0) {
-            charFound.push(`${char}:${action}`);
-            break;
-          }
-        }
-        if (charFound.length > 0) {
-          actions.push(charFound[0]);
-        }
-      }
-      if (panel.dialogue && panel.characters[0] && !actions.some((a) => a.includes("说"))) {
-        actions.push(`${panel.characters[0]}:说话`);
-      }
-    }
-    if (actions.length > 0) {
-      panel.characterActions = actions;
-    }
-  }
-  console.log(`[智能填充增强版] 音效: ${(_i = panel.soundEffects) == null ? void 0 : _i.join(",")} | 音乐: ${panel.music} | 运镜: ${panel.cameraMovement} | 镜头: ${panel.lens} | 光影: ${(_j = panel.lighting) == null ? void 0 : _j.mood}`);
-  return panel;
-}
-async function generateFallbackPanels(scenes, characters, assetsScenes, densityMode, directorStyle) {
-  const allPanels = [];
-  let panelNumber = 1;
-  scenes.forEach((scene) => {
-    var _a;
-    const dialogueCount = ((_a = scene.dialogues) == null ? void 0 : _a.length) || 0;
-    const actionLength = (scene.action || "").length;
-    devLog(`[Fallback 场景${scene.sceneNumber}] ${dialogueCount}句对白, ${actionLength}字动作`);
-    allPanels.push({
-      id: generateId(),
-      panelNumber: panelNumber++,
-      sceneId: scene.id,
-      episodeNumber: scene.episodeNumber,
-      description: `${scene.location || "场景"}，${scene.timeOfDay || "日"}。${(scene.action || "").substring(0, 80)}`,
-      shot: "远景",
-      angle: "平视",
-      cameraMovement: "静止",
-      duration: 4,
-      characters: scene.characters || [],
-      dialogue: "",
-      props: [],
-      notes: "建立场景",
-      aiPrompt: "",
-      aiVideoPrompt: ""
-    });
-    if (scene.dialogues && scene.dialogues.length > 0) {
-      const config2 = DENSITY_CONFIG[densityMode] || DENSITY_CONFIG.standard;
-      scene.dialogues.forEach((dialogue, idx) => {
-        const fullDialogue = dialogue.lines || "";
-        const character = dialogue.character;
-        const dialogueChunks = splitLongDialogue(fullDialogue, config2.longDialogueThreshold);
-        dialogueChunks.forEach((chunk, chunkIdx) => {
-          const isFirst = idx === 0 && chunkIdx === 0;
-          allPanels.push({
-            id: generateId(),
-            panelNumber: panelNumber++,
-            sceneId: scene.id,
-            episodeNumber: scene.episodeNumber,
-            description: `${isFirst ? "近景" : "特写"}，${character}${dialogue.parenthetical ? `（${dialogue.parenthetical}）` : ""}说话，表情变化`,
-            shot: isFirst ? "近景" : "特写",
-            angle: "平视",
-            cameraMovement: "静止",
-            duration: Math.max(2, Math.ceil(chunk.length / 20)),
-            characters: [character],
-            dialogue: chunk,
-            props: [],
-            notes: dialogueChunks.length > 1 ? `对话 ${idx + 1}-${chunkIdx + 1}` : `对话 ${idx + 1}`,
-            aiPrompt: "",
-            aiVideoPrompt: ""
-          });
-        });
-      });
-    }
-    const config = DENSITY_CONFIG[densityMode] || DENSITY_CONFIG.standard;
-    if (actionLength > config.actionCharsPerPanel / 2) {
-      const actionParts = Math.ceil(actionLength / config.actionCharsPerPanel);
-      for (let i = 0; i < Math.min(actionParts, 3); i++) {
-        const actionText = (scene.action || "").substring(i * config.actionCharsPerPanel, (i + 1) * config.actionCharsPerPanel);
-        if (actionText.trim()) {
-          allPanels.push({
-            id: generateId(),
-            panelNumber: panelNumber++,
-            sceneId: scene.id,
-            episodeNumber: scene.episodeNumber,
-            description: `中景，${actionText}`,
-            shot: "中景",
-            angle: "平视",
-            cameraMovement: i === 0 ? "静止" : "跟",
-            duration: 3,
-            characters: scene.characters || [],
-            dialogue: "",
-            props: [],
-            notes: "动作描写",
-            aiPrompt: "",
-            aiVideoPrompt: ""
-          });
-        }
-      }
-    }
-  });
-  const filledPanels = allPanels.map((panel, index) => {
-    const matchedScene = scenes.find((s) => s.id === panel.sceneId);
-    const prevPanel = index > 0 ? allPanels[index - 1] : void 0;
-    const nextPanel = index < allPanels.length - 1 ? allPanels[index + 1] : void 0;
-    const filledPanel = smartFillPanel(panel, matchedScene, prevPanel, nextPanel, allPanels);
-    filledPanel.aiPrompt = generateStoryboardImagePrompt(filledPanel, characters, assetsScenes, directorStyle);
-    filledPanel.aiVideoPrompt = generateStoryboardVideoPrompt(filledPanel, characters, assetsScenes, directorStyle, prevPanel);
-    return filledPanel;
-  });
-  devLog(`[智能Fallback] 共生成 ${filledPanels.length} 个分镜（${scenes.length} 个场景）`);
-  return filledPanels;
-}
-async function extractStoryboard(scenes, characters = [], assetsScenes = [], densityMode = "standard", directorStyle) {
-  var _a;
-  const MAX_SCENES_FOR_AI = 15;
-  if (scenes.length > MAX_SCENES_FOR_AI) {
-    devLog(`[extractStoryboard] 场景数量 ${scenes.length} 超过限制 ${MAX_SCENES_FOR_AI}，直接使用智能 Fallback`);
-    return generateFallbackPanels(scenes, characters, assetsScenes, densityMode, directorStyle);
-  }
-  const scenesData = scenes.map((s, idx) => {
-    var _a2;
-    return {
-      id: s.id,
-      sceneNumber: s.sceneNumber,
-      location: s.location,
-      timeOfDay: s.timeOfDay,
-      sceneType: s.sceneType,
-      action: s.action,
-      characters: s.characters,
-      dialogues: (_a2 = s.dialogues) == null ? void 0 : _a2.map((d) => {
-        var _a3;
-        return {
-          character: d.character,
-          lines: (_a3 = d.lines) == null ? void 0 : _a3.substring(0, 500)
-          // 增加对白长度，保留更多戏剧细节
-        };
-      }),
-      beat: s.beat,
-      specialSceneType: s.specialSceneType
-    };
-  });
-  const characterContext = characters.map((c) => `- ${c.name}: ${c.appearance || c.description}`).join("\n");
-  const sceneContext = assetsScenes.map((s) => `- ${s.name}: ${s.environment || s.description}`).join("\n");
-  const densityPrompt = ((_a = DENSITY_CONFIG[densityMode]) == null ? void 0 : _a.promptDescription) || DENSITY_CONFIG.standard.promptDescription;
-  const config = DENSITY_CONFIG[densityMode] || DENSITY_CONFIG.standard;
-  let estimatedTotal = 0;
-  scenes.forEach((scene) => {
-    var _a2;
-    const dialogueCount = ((_a2 = scene.dialogues) == null ? void 0 : _a2.length) || 0;
-    const actionLength = (scene.action || "").length;
-    estimatedTotal += config.basePerScene + Math.ceil(dialogueCount * config.panelsPerDialogue) + Math.ceil(actionLength / config.actionCharsPerPanel);
-  });
-  const prompt = `你是专业分镜设计师兼音效设计师，将剧本场景逐帧转换为精确的漫画分镜。
-
-【⚠️ 核心约束 - 必须严格遵守】
-1. **预估分镜数量：约 ${estimatedTotal} 个**，请确保生成数量接近此目标
-2. **🔴 每句对话必须生成独立分镜**：一句对白 = 一个分镜，不可合并！
-3. **每个场景开头必须有建立镜头**（远景/全景）
-4. **长动作描写（>50字）必须拆分为多个动作镜头**
-
-【🎬 蒙太奇/快速剪辑规则】
-- 如果剧本描述"一系列动作"或"快速剪辑"，必须逐个动作拆分
-- 例如："洗脸、换衣、吃吐司" = 3个独立分镜，每个动作一镜
-- 日常动作序列必须完整呈现，不可压缩合并
-
-【✨ 超现实/特效描写规则】
-- 眩晕、幻觉、闪回等主观体验必须独立成镜
-- 发光、变形、扭曲等视觉特效必须专门描述
-- 声音扭曲、时间变慢等感官变化需转化为视觉语言
-
-【密度要求】
-${densityPrompt}
-
-【数量检查规则】
-- 如果场景有 N 句对话，该场景至少生成 N+1 个分镜（1建立镜头 + N对话镜头）
-- 如果动作描写超过 ${config.actionCharsPerPanel} 字，增加动作分镜
-- 蒙太奇序列中每个动词对应一个分镜
-- 多人对话场景，每 2-3 句对话可增加 1 个反应镜头
-
-【角色与环境参考】
-${characterContext ? `角色描述：
-${characterContext}
-` : ""}
-${sceneContext ? `环境描述：
-${sceneContext}
-` : ""}
-${directorStyle ? `导演风格：${directorStyle.artStyle || ""}, 氛围: ${directorStyle.mood || ""}
-` : ""}
-
-【分镜类型】
-- 建立镜头：远景/全景展示场景环境（每个场景开头必须有）
-- 动作镜头：中景/近景展示人物动作（🔴 每个动作一镜）
-- 对话镜头：近景/特写展示说话者表情 + 完整对白（🔴 每句对话一镜）
-- 反应镜头：特写展示听者反应
-- 特效镜头：展示超现实/幻觉/特效画面（🔴 必须独立成镜）
-- 过渡镜头：衔接场景的视觉过渡
-
-【景别代码】ECU(大特写)/CU(特写)/MCU(近景)/MS(中景)/MWS(中全景)/WS(远景)/EWS(大远景)/POV(主观)/OTS(过肩)
-【角度代码】EYE_LEVEL(平视)/HIGH(俯视)/LOW(仰视)/DUTCH(倾斜)
-【运动代码】STATIC(静止)/PAN_L(左摇)/PAN_R(右摇)/DOLLY_IN(推)/DOLLY_OUT(拉)/TRACK_L(左移)/TRACK_R(右移)/FOLLOW(跟随)
-
-【专业导演字段规范】
-- composition: 构图方式（三分法/对称/框架/引导线/黄金分割/对角线等）
-- shotIntent: 镜头意图（建立空间/展示情绪/推进剧情/揭示细节/制造悬念等）
-- axisNote: 轴线备注（保持轴线/跨轴用_切换/人物相对位置等）
-- environmentMotion: 环境动态（风吹树叶/烟雾飘散/水波涟漪/雨水滴落等）
-- characterActions: 角色动作数组（如["李明:转身","张三:点头"]）
-
-【音效设计规范】
-- soundEffects：根据画面内容设计精确音效，如「铠甲碰撞声」「古琴悠扬」「马蹄踏尘」「雨打芭蕉」
-- music：根据情绪节拍设计背景音乐，如「古风悲壮BGM渐强」「电子节拍动感UP」「钢琴抒情轻柔」
-- startFrame：起始帧画面描述，如「剑士背影，夕阳血红」
-- endFrame：结束帧画面描述，如「剑士转身，眼神坚毅」
-
-【输出规则】
-1. 只输出纯 JSON 数组
-2. description 字段 50-150 字，描述画面内容 + 光影氛围，请结合【角色与环境参考】中的具体描述
-3. 对话分镜必须包含 dialogue 字段（完整对白，不可省略或合并）
-4. 每个分镜必须有明确的 characters 数组
-5. 每个分镜必须有 soundEffects（数组）和 music（字符串）
-6. 每个分镜必须有 startFrame 和 endFrame 描述
-7. **每个分镜必须有 composition、shotIntent、axisNote、environmentMotion、characterActions**
-8. **🔴 生成的分镜总数必须接近 ${estimatedTotal} 个**
-
-【JSON 格式】
-[{"sceneId":"场景ID","description":"画面描述（含光影）","shotSize":"MS","angle":"EYE_LEVEL","movementType":"STATIC","duration":3,"characters":["角色名"],"dialogue":"完整对白（如有）","emotionalBeat":"CALM","focusSubject":"视觉焦点","atmosphere":"氛围","transition":"切至","soundEffects":["具体音效1","具体音效2"],"music":"具体背景音乐描述","startFrame":"起始帧画面","endFrame":"结束帧画面","composition":"构图方式","shotIntent":"镜头意图","axisNote":"轴线备注","environmentMotion":"环境动态","characterActions":["角色名:动作"]}]
-
-【示例：对话场景必须拆分】
-假设场景有 2 句对话："你好" 和 "再见"，必须生成至少 3 个分镜：
-1. 建立镜头（场景全景）
-2. 对话镜头1（"你好"）
-3. 对话镜头2（"再见"）
-
-【剧本场景】
-${JSON.stringify(scenesData)}
-`;
-  try {
-    const result = await callWithRetry(
-      () => callDeepSeek([{ role: "user", content: prompt }]),
-      3,
-      1e3
-    );
-    let shots = parseJSON(result);
-    if (!shots) {
-      console.error("extractStoryboard: parseJSON returned null/undefined");
-      shots = [];
-    }
-    if (!Array.isArray(shots)) {
-      if (shots.panels) shots = shots.panels;
-      else if (shots.shots) shots = shots.shots;
-      else if (shots.storyboard) shots = shots.storyboard;
-      else {
-        console.error("extractStoryboard: unexpected data structure", typeof shots);
-        shots = [];
-      }
-    }
-    if (shots.length === 0) {
-      console.warn("extractStoryboard: no shots extracted, using smart fallback");
-      const allPanels2 = [];
-      let panelNumber = 1;
-      scenes.forEach((scene) => {
-        var _a2;
-        const dialogueCount = ((_a2 = scene.dialogues) == null ? void 0 : _a2.length) || 0;
-        const actionLength = (scene.action || "").length;
-        console.log(`[场景${scene.sceneNumber}] 分析: ${dialogueCount}句对白, ${actionLength}字动作`);
-        allPanels2.push({
-          id: generateId(),
-          panelNumber: panelNumber++,
-          sceneId: scene.id,
-          episodeNumber: scene.episodeNumber,
-          description: `${scene.location || "场景"}，${scene.timeOfDay || "日"}。${(scene.action || "").substring(0, 80)}`,
-          shot: "远景",
-          angle: "平视",
-          cameraMovement: "静止",
-          duration: 4,
-          characters: scene.characters || [],
-          dialogue: "",
-          props: [],
-          notes: "建立场景",
-          aiPrompt: "",
-          aiVideoPrompt: ""
-        });
-        if (scene.dialogues && scene.dialogues.length > 0) {
-          const config3 = DENSITY_CONFIG[densityMode] || DENSITY_CONFIG.standard;
-          scene.dialogues.forEach((dialogue, idx) => {
-            const fullDialogue = dialogue.lines || "";
-            const character = dialogue.character;
-            const dialogueChunks = splitLongDialogue(fullDialogue, config3.longDialogueThreshold);
-            dialogueChunks.forEach((chunk, chunkIdx) => {
-              const isFirst = idx === 0 && chunkIdx === 0;
-              allPanels2.push({
-                id: generateId(),
-                panelNumber: panelNumber++,
-                sceneId: scene.id,
-                episodeNumber: scene.episodeNumber,
-                description: `${isFirst ? "近景" : "特写"}，${character}${dialogue.parenthetical ? `（${dialogue.parenthetical}）` : ""}说话${chunkIdx > 0 ? "（续）" : ""}，表情变化`,
-                shot: isFirst ? "近景" : "特写",
-                angle: "平视",
-                cameraMovement: "静止",
-                duration: Math.max(2, Math.ceil(chunk.length / 20)),
-                characters: [character],
-                dialogue: chunk,
-                props: [],
-                notes: dialogueChunks.length > 1 ? `对话 ${idx + 1}-${chunkIdx + 1}` : `对话 ${idx + 1}`,
-                aiPrompt: "",
-                aiVideoPrompt: ""
-              });
-            });
-            if (config3.addReactionShots && scene.characters && scene.characters.length >= 2) {
-              const otherCharacters = (scene.characters || []).filter((c) => c !== character);
-              if (otherCharacters.length > 0 && idx < scene.dialogues.length - 1) {
-                if (idx % 2 === 1) {
-                  const reactor = otherCharacters[0];
-                  allPanels2.push({
-                    id: generateId(),
-                    panelNumber: panelNumber++,
-                    sceneId: scene.id,
-                    episodeNumber: scene.episodeNumber,
-                    description: `特写，${reactor}倾听反应，表情微变`,
-                    shot: "特写",
-                    angle: "平视",
-                    cameraMovement: "静止",
-                    duration: 2,
-                    characters: [reactor],
-                    dialogue: "",
-                    props: [],
-                    notes: "反应镜头",
-                    aiPrompt: "",
-                    aiVideoPrompt: ""
-                  });
-                }
-              }
-            }
-          });
-        }
-        const config2 = DENSITY_CONFIG[densityMode] || DENSITY_CONFIG.standard;
-        if (actionLength > config2.actionCharsPerPanel / 2) {
-          const actionParts = Math.ceil(actionLength / config2.actionCharsPerPanel);
-          const maxActionPanels = config2.maxPerScene - allPanels2.filter((p) => p.sceneId === scene.id).length;
-          for (let i = 0; i < Math.min(actionParts, maxActionPanels, 5); i++) {
-            const actionText = (scene.action || "").substring(i * config2.actionCharsPerPanel, (i + 1) * config2.actionCharsPerPanel);
-            if (actionText.trim()) {
-              allPanels2.push({
-                id: generateId(),
-                panelNumber: panelNumber++,
-                sceneId: scene.id,
-                episodeNumber: scene.episodeNumber,
-                description: `中景，${actionText}`,
-                shot: "中景",
-                angle: "平视",
-                cameraMovement: i === 0 ? "静止" : "跟",
-                duration: 3,
-                characters: scene.characters || [],
-                dialogue: "",
-                props: [],
-                notes: "动作描写",
-                aiPrompt: "",
-                aiVideoPrompt: ""
-              });
-            }
-          }
-        }
-      });
-      const filledPanels = allPanels2.map((panel, index) => {
-        const matchedScene = scenes.find((s) => s.id === panel.sceneId);
-        const prevPanel = index > 0 ? allPanels2[index - 1] : void 0;
-        const nextPanel = index < allPanels2.length - 1 ? allPanels2[index + 1] : void 0;
-        const filledPanel = smartFillPanel(panel, matchedScene, prevPanel, nextPanel, allPanels2);
-        filledPanel.aiPrompt = generateStoryboardImagePrompt(filledPanel, characters, assetsScenes, directorStyle);
-        filledPanel.aiVideoPrompt = generateStoryboardVideoPrompt(filledPanel, characters, assetsScenes, directorStyle, prevPanel);
-        return filledPanel;
-      });
-      console.log(`[智能Fallback] 共生成 ${filledPanels.length} 个分镜（${scenes.length} 个场景，含对话分镜）`);
-      return filledPanels;
-    }
-    const SHOT_CODE_TO_CN = {
-      "ECU": "大特写",
-      "CU": "特写",
-      "MCU": "近景",
-      "MS": "中景",
-      "MWS": "全景",
-      "WS": "远景",
-      "EWS": "大远景",
-      "POV": "中景",
-      "OTS": "中景",
-      "TWO": "中景",
-      "GROUP": "全景",
-      "INSERT": "特写"
-    };
-    const ANGLE_CODE_TO_CN = {
-      "EYE_LEVEL": "平视",
-      "HIGH": "俯视",
-      "LOW": "仰视",
-      "BIRDS_EYE": "俯视",
-      "WORMS_EYE": "仰视",
-      "DUTCH": "平视"
-    };
-    const MOVEMENT_CODE_TO_CN = {
-      "STATIC": "静止",
-      "PAN_L": "摇",
-      "PAN_R": "摇",
-      "TILT_UP": "摇",
-      "TILT_DOWN": "摇",
-      "DOLLY_IN": "推",
-      "DOLLY_OUT": "拉",
-      "TRACK_L": "移",
-      "TRACK_R": "移",
-      "CRANE_UP": "升降",
-      "CRANE_DOWN": "升降",
-      "ZOOM_IN": "推",
-      "ZOOM_OUT": "拉",
-      "HANDHELD": "移",
-      "STEADICAM": "移",
-      "FOLLOW": "跟",
-      "ARC": "环绕",
-      "WHIP": "摇"
-    };
-    const allPanels = shots.map((shot, index) => {
-      const matchedScene = scenes.find((s) => s.id === shot.sceneId) || scenes[Math.floor(index / 3)];
-      const rawShotSize = shot.shotSize || shot.shot || "MS";
-      const rawAngle = shot.angle || "EYE_LEVEL";
-      const rawMovement = shot.movementType || shot.cameraMovement || "STATIC";
-      return {
-        id: generateId(),
-        panelNumber: index + 1,
-        sceneId: (matchedScene == null ? void 0 : matchedScene.id) || generateId(),
-        episodeNumber: (matchedScene == null ? void 0 : matchedScene.episodeNumber) || 1,
-        description: shot.description || "",
-        dialogue: shot.dialogue || "",
-        // UI 兼容字段（使用中文值）
-        shot: SHOT_CODE_TO_CN[rawShotSize] || "中景",
-        angle: ANGLE_CODE_TO_CN[rawAngle] || "平视",
-        cameraMovement: MOVEMENT_CODE_TO_CN[rawMovement] || "静止",
-        // 新专业字段（保留原始代码用于导出）
-        shotSize: rawShotSize,
-        cameraAngle: rawAngle,
-        movementType: rawMovement,
-        duration: shot.duration || 4,
-        characters: shot.characters || (matchedScene == null ? void 0 : matchedScene.characters) || [],
-        props: shot.props || [],
-        notes: shot.notes || "",
-        // 专业扩展字段（AI返回值，可能为空）
-        composition: shot.composition,
-        shotIntent: shot.shotIntent,
-        focusPoint: shot.focusPoint,
-        axisNote: shot.axisNote,
-        // 🆕 音效和转场（直接读取 AI 返回值）
-        soundEffects: shot.soundEffects || [],
-        transition: shot.transition || "切至",
-        music: shot.music || "",
-        // 🆕 帧描述（直接读取 AI 返回值）
-        startFrame: shot.startFrame || "",
-        endFrame: shot.endFrame || "",
-        motionSpeed: shot.motionSpeed || "normal",
-        environmentMotion: shot.environmentMotion || "",
-        characterActions: shot.characterActions || [],
-        keyFrames: [],
-        _matchedScene: matchedScene
-        // 临时存储，用于第二遍
-      };
-    });
-    const processedPanels = allPanels.map((panelData, index) => {
-      const matchedScene = panelData._matchedScene;
-      delete panelData._matchedScene;
-      const prevPanel = index > 0 ? allPanels[index - 1] : void 0;
-      const nextPanel = index < allPanels.length - 1 ? allPanels[index + 1] : void 0;
-      const filledPanel = smartFillPanel(panelData, matchedScene, prevPanel, nextPanel, allPanels);
-      const imagePrompt = generateStoryboardImagePrompt(filledPanel, characters, assetsScenes, directorStyle);
-      const videoPrompt = generateStoryboardVideoPrompt(filledPanel, characters, assetsScenes, directorStyle, prevPanel);
-      console.log(`[分镜${index + 1}] 智能填充完成:`, {
-        soundEffects: filledPanel.soundEffects,
-        music: filledPanel.music,
-        composition: filledPanel.composition,
-        axisNote: filledPanel.axisNote,
-        cameraMovement: filledPanel.cameraMovement
-      });
-      const unknownChars = checkCharacterConsistency(filledPanel.characters || [], characters);
-      if (unknownChars.length > 0) {
-        console.warn(`[分镜${index + 1}] ⚠️ 未知角色: ${unknownChars.join(", ")}`);
-        filledPanel.notes = `${filledPanel.notes || ""} [警告: 未知角色 ${unknownChars.join(", ")}]`.trim();
-      }
-      filledPanel.aiPrompt = imagePrompt;
-      filledPanel.aiVideoPrompt = videoPrompt;
-      return filledPanel;
-    });
-    const coveredSceneIds = new Set(processedPanels.map((p) => p.sceneId));
-    const missingScenes = scenes.filter((s) => !coveredSceneIds.has(s.id));
-    if (missingScenes.length > 0) {
-      console.warn(
-        `[extractStoryboard] ⚠️ AI 遗漏了 ${missingScenes.length} 个场景，使用 Fallback 补充:`,
-        missingScenes.map((s) => `场景${s.sceneNumber}: ${s.location}`).join(", ")
-      );
-      let panelNumber = processedPanels.length + 1;
-      const configForFallback = DENSITY_CONFIG[densityMode] || DENSITY_CONFIG.standard;
-      missingScenes.forEach((scene) => {
-        const establishingPanel = {
-          id: generateId(),
-          panelNumber: panelNumber++,
-          sceneId: scene.id,
-          episodeNumber: scene.episodeNumber,
-          description: `${scene.location || "场景"}，${scene.timeOfDay || "日"}。${(scene.action || "").substring(0, 80)}`,
-          shot: "远景",
-          angle: "平视",
-          cameraMovement: "静止",
-          duration: 4,
-          characters: scene.characters || [],
-          dialogue: "",
-          props: [],
-          notes: "建立场景（AI遗漏补充）",
-          aiPrompt: "",
-          aiVideoPrompt: "",
-          soundEffects: [],
-          music: "",
-          startFrame: "",
-          endFrame: "",
-          composition: "三分法",
-          shotIntent: "建立空间"
-        };
-        const filledEstablishing = smartFillPanel(establishingPanel, scene, void 0, void 0, processedPanels);
-        filledEstablishing.aiPrompt = generateStoryboardImagePrompt(filledEstablishing, characters, assetsScenes, directorStyle);
-        filledEstablishing.aiVideoPrompt = generateStoryboardVideoPrompt(filledEstablishing, characters, assetsScenes, directorStyle, void 0);
-        processedPanels.push(filledEstablishing);
-        if (scene.dialogues && scene.dialogues.length > 0) {
-          scene.dialogues.forEach((dialogue, idx) => {
-            const dialoguePanel = {
-              id: generateId(),
-              panelNumber: panelNumber++,
-              sceneId: scene.id,
-              episodeNumber: scene.episodeNumber,
-              description: `${idx === 0 ? "近景" : "特写"}，${dialogue.character}${dialogue.parenthetical ? `（${dialogue.parenthetical}）` : ""}说话，表情变化`,
-              shot: idx === 0 ? "近景" : "特写",
-              angle: "平视",
-              cameraMovement: "静止",
-              duration: Math.max(2, Math.ceil((dialogue.lines || "").length / 20)),
-              characters: [dialogue.character],
-              dialogue: dialogue.lines || "",
-              props: [],
-              notes: `对话 ${idx + 1}（AI遗漏补充）`,
-              aiPrompt: "",
-              aiVideoPrompt: "",
-              soundEffects: [],
-              music: "",
-              startFrame: "",
-              endFrame: "",
-              composition: "三分法",
-              shotIntent: "展示情绪"
-            };
-            const filledDialogue = smartFillPanel(dialoguePanel, scene, void 0, void 0, processedPanels);
-            filledDialogue.aiPrompt = generateStoryboardImagePrompt(filledDialogue, characters, assetsScenes, directorStyle);
-            filledDialogue.aiVideoPrompt = generateStoryboardVideoPrompt(filledDialogue, characters, assetsScenes, directorStyle, void 0);
-            processedPanels.push(filledDialogue);
-          });
-        }
-        const actionLength = (scene.action || "").length;
-        if (actionLength > configForFallback.actionCharsPerPanel / 2) {
-          const actionParts = Math.ceil(actionLength / configForFallback.actionCharsPerPanel);
-          for (let i = 0; i < Math.min(actionParts, 3); i++) {
-            const actionText = (scene.action || "").substring(i * configForFallback.actionCharsPerPanel, (i + 1) * configForFallback.actionCharsPerPanel);
-            if (actionText.trim()) {
-              const actionPanel = {
-                id: generateId(),
-                panelNumber: panelNumber++,
-                sceneId: scene.id,
-                episodeNumber: scene.episodeNumber,
-                description: `中景，${actionText}`,
-                shot: "中景",
-                angle: "平视",
-                cameraMovement: i === 0 ? "静止" : "跟",
-                duration: 3,
-                characters: scene.characters || [],
-                dialogue: "",
-                props: [],
-                notes: "动作描写（AI遗漏补充）",
-                aiPrompt: "",
-                aiVideoPrompt: "",
-                soundEffects: [],
-                music: "",
-                startFrame: "",
-                endFrame: ""
-              };
-              const filledAction = smartFillPanel(actionPanel, scene, void 0, void 0, processedPanels);
-              filledAction.aiPrompt = generateStoryboardImagePrompt(filledAction, characters, assetsScenes, directorStyle);
-              filledAction.aiVideoPrompt = generateStoryboardVideoPrompt(filledAction, characters, assetsScenes, directorStyle, void 0);
-              processedPanels.push(filledAction);
-            }
-          }
-        }
-        console.log(`[场景覆盖补充] 场景${scene.sceneNumber} "${scene.location}" 补充完成`);
-      });
-      console.log(`[extractStoryboard] ✅ 场景覆盖补充完成，共 ${processedPanels.length} 个分镜（原 ${allPanels.length} + 补充 ${processedPanels.length - allPanels.length}）`);
-    }
-    return processedPanels;
-  } catch (error) {
-    console.error("DeepSeek extractStoryboard failed:", error);
-    throw new Error("AI 分镜生成失败");
-  }
-}
-async function generateStoryboardImage(panel, characters, scenes, directorStyle, enableOptimization = true, maxRetries = 3, imageSize) {
-  const { generateStoryboardImagePrompt: generateStoryboardImagePrompt2 } = await __vitePreload(async () => {
-    const { generateStoryboardImagePrompt: generateStoryboardImagePrompt22 } = await Promise.resolve().then(() => promptGenerator);
-    return { generateStoryboardImagePrompt: generateStoryboardImagePrompt22 };
-  }, true ? void 0 : void 0);
-  let imagePrompt = generateStoryboardImagePrompt2(panel, characters, scenes, directorStyle);
-  if (enableOptimization) {
-    try {
-      const { optimizePrompt: optimizePrompt2 } = await __vitePreload(async () => {
-        const { optimizePrompt: optimizePrompt22 } = await Promise.resolve().then(() => volcApi);
-        return { optimizePrompt: optimizePrompt22 };
-      }, true ? void 0 : void 0);
-      imagePrompt = await optimizePrompt2(
-        imagePrompt,
-        (directorStyle == null ? void 0 : directorStyle.artStyle) || "Cinematic",
-        "storyboard"
-      );
-    } catch (e) {
-      console.warn("Prompt optimization failed, using original", e);
-    }
-  }
-  const { IMAGE_SIZES: IMAGE_SIZES2 } = await __vitePreload(async () => {
-    const { IMAGE_SIZES: IMAGE_SIZES3 } = await Promise.resolve().then(() => imageSizes);
-    return { IMAGE_SIZES: IMAGE_SIZES3 };
-  }, true ? void 0 : void 0);
-  const { callDoubaoImage: callDoubaoImage2 } = await __vitePreload(async () => {
-    const { callDoubaoImage: callDoubaoImage22 } = await Promise.resolve().then(() => volcApi);
-    return { callDoubaoImage: callDoubaoImage22 };
-  }, true ? void 0 : void 0);
-  let selectedSize = IMAGE_SIZES2.STORYBOARD;
-  if (panel.aspectRatio) {
-    const aspectSizeMap = {
-      "16:9": IMAGE_SIZES2.STORYBOARD_16_9,
-      "9:16": IMAGE_SIZES2.STORYBOARD_9_16,
-      "1:1": IMAGE_SIZES2.STORYBOARD_1_1,
-      "4:3": IMAGE_SIZES2.STORYBOARD_4_3,
-      "21:9": IMAGE_SIZES2.STORYBOARD_21_9
-    };
-    selectedSize = aspectSizeMap[panel.aspectRatio] || IMAGE_SIZES2.STORYBOARD;
-  }
-  let lastError = null;
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      console.log(`[图片生成] 第 ${attempt}/${maxRetries} 次尝试，尺寸: ${selectedSize}...`);
-      return await callDoubaoImage2(imagePrompt, selectedSize, directorStyle == null ? void 0 : directorStyle.negativePrompt);
-    } catch (error) {
-      lastError = error;
-      console.warn(`[图片生成] 第 ${attempt} 次失败:`, error);
-      if (attempt < maxRetries) {
-        const delay2 = 1e3 * attempt;
-        console.log(`[图片生成] ${delay2}ms 后重试...`);
-        await new Promise((resolve) => setTimeout(resolve, delay2));
-      }
-    }
-  }
-  console.error("[图片生成] 所有重试均失败:", lastError);
-  return `https://placehold.co/1024x576?text=${encodeURIComponent("AI生成失败（已重试" + maxRetries + "次）")}`;
 }
 async function extractAssets(originalText, scenesCount, directorStyle) {
   const characterNames = /* @__PURE__ */ new Set();
@@ -15465,6 +15287,80 @@ const StoryboardPrintTemplate = ({
     ] })
   ] });
 };
+const scriptRel = "modulepreload";
+const assetsURL = function(dep) {
+  return "/juben/" + dep;
+};
+const seen = {};
+const __vitePreload = function preload(baseModule, deps, importerUrl) {
+  let promise = Promise.resolve();
+  if (deps && deps.length > 0) {
+    let allSettled2 = function(promises) {
+      return Promise.all(
+        promises.map(
+          (p) => Promise.resolve(p).then(
+            (value) => ({ status: "fulfilled", value }),
+            (reason) => ({ status: "rejected", reason })
+          )
+        )
+      );
+    };
+    document.getElementsByTagName("link");
+    const cspNonceMeta = document.querySelector(
+      "meta[property=csp-nonce]"
+    );
+    const cspNonce = (cspNonceMeta == null ? void 0 : cspNonceMeta.nonce) || (cspNonceMeta == null ? void 0 : cspNonceMeta.getAttribute("nonce"));
+    promise = allSettled2(
+      deps.map((dep) => {
+        dep = assetsURL(dep);
+        if (dep in seen) return;
+        seen[dep] = true;
+        const isCss = dep.endsWith(".css");
+        const cssSelector = isCss ? '[rel="stylesheet"]' : "";
+        if (document.querySelector(`link[href="${dep}"]${cssSelector}`)) {
+          return;
+        }
+        const link = document.createElement("link");
+        link.rel = isCss ? "stylesheet" : scriptRel;
+        if (!isCss) {
+          link.as = "script";
+        }
+        link.crossOrigin = "";
+        link.href = dep;
+        if (cspNonce) {
+          link.setAttribute("nonce", cspNonce);
+        }
+        document.head.appendChild(link);
+        if (isCss) {
+          return new Promise((res, rej) => {
+            link.addEventListener("load", res);
+            link.addEventListener(
+              "error",
+              () => rej(new Error(`Unable to preload CSS for ${dep}`))
+            );
+          });
+        }
+      })
+    );
+  }
+  function handlePreloadError(err) {
+    const e = new Event("vite:preloadError", {
+      cancelable: true
+    });
+    e.payload = err;
+    window.dispatchEvent(e);
+    if (!e.defaultPrevented) {
+      throw err;
+    }
+  }
+  return promise.then((res) => {
+    for (const item of res || []) {
+      if (item.status !== "rejected") continue;
+      handlePreloadError(item.reason);
+    }
+    return baseModule().catch(handlePreloadError);
+  });
+};
 function useStoryboardData({ chapterId }) {
   const [script, setScript] = reactExports.useState(null);
   const [storyboard, setStoryboard] = reactExports.useState(null);
@@ -17075,6 +16971,62 @@ function StoryboardEditor() {
     )
   ] });
 }
+function createStorage(keyPrefix) {
+  return {
+    /**
+     * 生成完整的存储键
+     */
+    key: (id) => `${keyPrefix}_${id}`,
+    /**
+     * 获取存储的数据
+     */
+    get: (id) => {
+      try {
+        const key = `${keyPrefix}_${id}`;
+        const data = localStorage.getItem(key);
+        if (!data) return null;
+        return JSON.parse(data);
+      } catch (error) {
+        console.error(`[Storage] Failed to get ${keyPrefix}_${id}:`, error);
+        return null;
+      }
+    },
+    /**
+     * 保存数据到存储
+     */
+    set: (id, data) => {
+      try {
+        const key = `${keyPrefix}_${id}`;
+        localStorage.setItem(key, JSON.stringify(data));
+        return true;
+      } catch (error) {
+        console.error(`[Storage] Failed to set ${keyPrefix}_${id}:`, error);
+        return false;
+      }
+    },
+    /**
+     * 删除存储的数据
+     */
+    remove: (id) => {
+      try {
+        const key = `${keyPrefix}_${id}`;
+        localStorage.removeItem(key);
+        return true;
+      } catch (error) {
+        console.error(`[Storage] Failed to remove ${keyPrefix}_${id}:`, error);
+        return false;
+      }
+    },
+    /**
+     * 检查数据是否存在
+     */
+    has: (id) => {
+      const key = `${keyPrefix}_${id}`;
+      return localStorage.getItem(key) !== null;
+    }
+  };
+}
+const styleSettingsStorage = createStorage("styleSettings");
 function trackCharacterInScript(character, scripts) {
   const locations = [];
   scripts.forEach(({ script, chapterTitle, chapterId }) => {
@@ -17296,9 +17248,9 @@ function useAssetData({ projectId }) {
     if (projectId) {
       loadAssets();
       loadProject();
-      const savedSettings = localStorage.getItem(`styleSettings_${projectId}`);
+      const savedSettings = styleSettingsStorage.get(projectId);
       if (savedSettings) {
-        setStyleSettings(JSON.parse(savedSettings));
+        setStyleSettings(savedSettings);
       }
     }
   }, [projectId, loadAssets, loadProject]);
@@ -17621,42 +17573,6 @@ function useAssetData({ projectId }) {
     loadProject
   };
 }
-const IMAGE_SIZES = {
-  // 角色图片
-  CHARACTER_FULL_BODY: "1920x1920",
-  // 1:1 正方形 (3,686,400 像素) ✓ 改用正方形避免边界问题
-  CHARACTER_FACE: "1920x1920",
-  // 1:1 正方形 (3,686,400 像素) ✓
-  // 场景图片
-  SCENE_WIDE: "2560x1440",
-  // 16:9 横图 (3,686,400 像素) ✓
-  SCENE_MEDIUM: "1920x1920",
-  // 1:1 正方形 (3,686,400 像素) ✓
-  SCENE_CLOSEUP: "1920x1920",
-  // 1:1 正方形 (3,686,400 像素) ✓
-  // 道具和服饰
-  PROP: "1920x1920",
-  // 1:1 正方形 (3,686,400 像素) ✓
-  COSTUME: "1600x2304",
-  // 接近 3:4 竖图 (3,686,400 像素) ✓
-  // 分镜图片（🆕 多尺寸支持）
-  STORYBOARD: "2560x1440",
-  // 16:9 横图 (3,686,400 像素) ✓ 默认
-  STORYBOARD_16_9: "2560x1440",
-  // 16:9 横屏电影
-  STORYBOARD_9_16: "1440x2560",
-  // 9:16 竖屏手机
-  STORYBOARD_1_1: "1920x1920",
-  // 1:1 方形社交
-  STORYBOARD_4_3: "2080x1560",
-  // 4:3 经典比例
-  STORYBOARD_21_9: "2940x1260"
-  // 21:9 超宽电影
-};
-const imageSizes = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
-  __proto__: null,
-  IMAGE_SIZES
-}, Symbol.toStringTag, { value: "Module" }));
 function useImageGeneration({
   assets,
   project,
@@ -21989,6 +21905,29 @@ function StyleApplicationSettingsPanel({
     ] })
   ] });
 }
+function StyleSelect({
+  label,
+  description,
+  value,
+  onChange,
+  options,
+  placeholder
+}) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs(Card, { children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx(CardHeader, { children: /* @__PURE__ */ jsxRuntimeExports.jsx(CardTitle, { className: "text-lg", children: label }) }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs(CardContent, { className: "space-y-3", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs(Label, { children: [
+        "选择",
+        label
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs(Select, { value, onValueChange: onChange, children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(SelectTrigger, { children: /* @__PURE__ */ jsxRuntimeExports.jsx(SelectValue, { placeholder: placeholder || `选择${label}` }) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(SelectContent, { children: options.map((opt) => /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: opt.value, children: opt.label }, opt.value)) })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-gray-500", children: description })
+    ] })
+  ] });
+}
 const useProjectStore = create((set) => ({
   currentProject: null,
   isLoading: false,
@@ -22023,23 +21962,22 @@ const DEFAULT_STYLE_SETTINGS = {
   confirmBeforeApply: true,
   showPreview: true
 };
-function DirectorStyleEditor() {
-  const { projectId } = useParams();
+const DEFAULT_STYLE = {
+  artStyle: "",
+  colorTone: "",
+  lightingStyle: "",
+  cameraStyle: "",
+  mood: "",
+  customPrompt: "",
+  negativePrompt: "",
+  aspectRatio: "16:9",
+  videoFrameRate: "24",
+  motionIntensity: "normal"
+};
+function useDirectorStyle(projectId) {
   const { currentProject, loadProject, updateProject } = useProjectStore();
-  const { apiSettings } = useConfigStore();
   const isMountedRef = reactExports.useRef(true);
-  const [style, setStyle] = reactExports.useState({
-    artStyle: "",
-    colorTone: "",
-    lightingStyle: "",
-    cameraStyle: "",
-    mood: "",
-    customPrompt: "",
-    negativePrompt: "",
-    aspectRatio: "16:9",
-    videoFrameRate: "24",
-    motionIntensity: "normal"
-  });
+  const [style, setStyle] = reactExports.useState(DEFAULT_STYLE);
   const [styleSettings, setStyleSettings] = reactExports.useState(DEFAULT_STYLE_SETTINGS);
   const safeToast = reactExports.useCallback((message, type = "success") => {
     requestAnimationFrame(() => {
@@ -22062,22 +22000,24 @@ function DirectorStyleEditor() {
     setStyleSettings(newSettings);
     requestAnimationFrame(() => {
       if (isMountedRef.current && projectId) {
-        try {
-          localStorage.setItem(`styleSettings_${projectId}`, JSON.stringify(newSettings));
+        const success = styleSettingsStorage.set(projectId, newSettings);
+        if (success) {
           safeToast("应用设置已保存");
-        } catch (error) {
-          console.error("Failed to save settings:", error);
         }
       }
     });
   }, [projectId, safeToast]);
+  const resetStyle = reactExports.useCallback(() => {
+    setStyle(DEFAULT_STYLE);
+    safeToast("已重置所有风格设置");
+  }, [safeToast]);
   reactExports.useEffect(() => {
     isMountedRef.current = true;
     if (projectId) {
       loadProject(projectId);
-      const savedSettings = localStorage.getItem(`styleSettings_${projectId}`);
+      const savedSettings = styleSettingsStorage.get(projectId);
       if (savedSettings && isMountedRef.current) {
-        setStyleSettings(JSON.parse(savedSettings));
+        setStyleSettings(savedSettings);
       }
     }
     return () => {
@@ -22089,7 +22029,7 @@ function DirectorStyleEditor() {
       setStyle(currentProject.directorStyle);
     }
   }, [currentProject]);
-  const handleSave = async () => {
+  const handleSave = reactExports.useCallback(async () => {
     if (!currentProject || !isMountedRef.current) return;
     const oldStyle = currentProject.directorStyle;
     const hasStyleChanged = JSON.stringify(oldStyle) !== JSON.stringify(style);
@@ -22117,18 +22057,24 @@ function DirectorStyleEditor() {
     } catch (error) {
       safeToast("保存失败", "error");
     }
+  }, [currentProject, style, updateProject, safeToast, projectId]);
+  return {
+    style,
+    setStyle,
+    styleSettings,
+    currentProject,
+    isMountedRef,
+    safeToast,
+    safeUpdateStyle,
+    safeUpdateStyleSettings,
+    resetStyle,
+    handleSave
   };
-  const handleApplyPreset = (presetName) => {
-    if (!isMountedRef.current) return;
-    const preset = DIRECTOR_STYLE_PRESETS[presetName];
-    if (preset) {
-      setStyle(preset);
-      safeToast(`已应用 ${presetName}`);
-    }
-  };
+}
+function useStyleBatchApply(projectId, style, handleSave, isMountedRef) {
   const [isApplyingToAll, setIsApplyingToAll] = reactExports.useState(false);
   const handleApplyStyleToAllPanels = reactExports.useCallback(async () => {
-    if (!currentProject || !projectId || !isMountedRef.current) return;
+    if (!projectId || !isMountedRef.current) return;
     await handleSave();
     const confirmed = window.confirm(
       "确定要将当前导演风格应用到项目中所有分镜的提示词吗？\n\n这将为每个分镜重新生成优化后的AI提示词，可能需要一些时间。"
@@ -22167,7 +22113,6 @@ function DirectorStyleEditor() {
               const newPrompt = await optimizePrompt(
                 panel.description || "",
                 style,
-                // 传递完整的导演风格对象
                 "storyboard"
               );
               processedPanels++;
@@ -22198,7 +22143,120 @@ function DirectorStyleEditor() {
     } finally {
       setIsApplyingToAll(false);
     }
-  }, [currentProject, projectId, style, handleSave]);
+  }, [projectId, style, handleSave, isMountedRef]);
+  return {
+    isApplyingToAll,
+    handleApplyStyleToAllPanels
+  };
+}
+const ART_STYLE_OPTIONS = [
+  { value: "写实主义", label: "写实主义" },
+  { value: "手绘动画", label: "手绘动画" },
+  { value: "唯美写实", label: "唯美写实" },
+  { value: "赛博朋克", label: "赛博朋克" },
+  { value: "复古胶片", label: "复古胶片" },
+  { value: "黑白胶片", label: "黑白胶片" },
+  { value: "水彩风格", label: "水彩风格" },
+  { value: "油画风格", label: "油画风格" },
+  { value: "漫画风格", label: "漫画风格" },
+  { value: "像素艺术", label: "像素艺术" }
+];
+const COLOR_TONE_OPTIONS = [
+  { value: "温暖色调", label: "温暖色调" },
+  { value: "冷色调", label: "冷色调" },
+  { value: "中性色调", label: "中性色调" },
+  { value: "高饱和度", label: "高饱和度" },
+  { value: "低饱和度", label: "低饱和度" },
+  { value: "霓虹色彩", label: "霓虹色彩" },
+  { value: "黑白高对比", label: "黑白高对比" },
+  { value: "柔和色彩", label: "柔和色彩" },
+  { value: "复古色调", label: "复古色调" }
+];
+const LIGHTING_STYLE_OPTIONS = [
+  { value: "自然光", label: "自然光" },
+  { value: "柔和光线", label: "柔和光线" },
+  { value: "戏剧性光影", label: "戏剧性光影" },
+  { value: "强对比光", label: "强对比光" },
+  { value: "霓虹灯光", label: "霓虹灯光" },
+  { value: "黄金时刻", label: "黄金时刻（Golden Hour）" },
+  { value: "蓝调时刻", label: "蓝调时刻（Blue Hour）" },
+  { value: "强烈阴影", label: "强烈阴影" },
+  { value: "均匀照明", label: "均匀照明" }
+];
+const CAMERA_STYLE_OPTIONS = [
+  { value: "电影感", label: "电影感（Cinematic）" },
+  { value: "纪实风格", label: "纪实风格（Documentary）" },
+  { value: "梦幻风格", label: "梦幻风格（Dreamy）" },
+  { value: "IMAX", label: "IMAX 大画幅" },
+  { value: "手持摄影", label: "手持摄影（Handheld）" },
+  { value: "稳定器", label: "稳定器拍摄（Gimbal）" },
+  { value: "广角镜头", label: "广角镜头" },
+  { value: "长焦镜头", label: "长焦镜头" },
+  { value: "鱼眼镜头", label: "鱼眼镜头" }
+];
+const MOOD_OPTIONS = [
+  { value: "温馨", label: "温馨" },
+  { value: "紧张", label: "紧张" },
+  { value: "神秘", label: "神秘" },
+  { value: "欢快", label: "欢快" },
+  { value: "悲伤", label: "悲伤" },
+  { value: "浪漫", label: "浪漫" },
+  { value: "恐怖", label: "恐怖" },
+  { value: "史诗", label: "史诗感" },
+  { value: "忧郁", label: "忧郁" },
+  { value: "激动", label: "激动人心" },
+  { value: "宁静", label: "宁静" }
+];
+const ASPECT_RATIO_OPTIONS = [
+  { value: "16:9", label: "16:9（电影/横屏）" },
+  { value: "4:3", label: "4:3（传统电视）" },
+  { value: "1:1", label: "1:1（方形/社交媒体）" },
+  { value: "9:16", label: "9:16（竖屏/短视频）" },
+  { value: "21:9", label: "21:9（超宽屏/电影院）" }
+];
+const FRAME_RATE_OPTIONS = [
+  { value: "24", label: "24 fps（电影标准）" },
+  { value: "30", label: "30 fps（电视/网络）" },
+  { value: "60", label: "60 fps（流畅/游戏）" }
+];
+const MOTION_INTENSITY_OPTIONS = [
+  { value: "subtle", label: "微妙（细腻动作）" },
+  { value: "normal", label: "正常（标准运动）" },
+  { value: "dynamic", label: "强烈（动态激烈）" }
+];
+const MOTION_INTENSITY_LABELS = {
+  "subtle": "微妙",
+  "normal": "正常",
+  "dynamic": "强烈"
+};
+function DirectorStyleEditor() {
+  const { projectId } = useParams();
+  const {
+    style,
+    setStyle,
+    styleSettings,
+    currentProject,
+    isMountedRef,
+    safeToast,
+    safeUpdateStyle,
+    safeUpdateStyleSettings,
+    resetStyle,
+    handleSave
+  } = useDirectorStyle(projectId);
+  const { isApplyingToAll, handleApplyStyleToAllPanels } = useStyleBatchApply(
+    projectId,
+    style,
+    handleSave,
+    isMountedRef
+  );
+  const handleApplyPreset = (presetName) => {
+    if (!isMountedRef.current) return;
+    const preset = DIRECTOR_STYLE_PRESETS[presetName];
+    if (preset) {
+      setStyle(preset);
+      safeToast(`已应用 ${presetName}`);
+    }
+  };
   if (!currentProject) {
     return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex items-center justify-center h-64", children: /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-gray-500", children: "加载项目配置中..." }) });
   }
@@ -22210,238 +22268,97 @@ function DirectorStyleEditor() {
       /* @__PURE__ */ jsxRuntimeExports.jsx(BreadcrumbSeparator, {}),
       /* @__PURE__ */ jsxRuntimeExports.jsx(BreadcrumbItem, { children: /* @__PURE__ */ jsxRuntimeExports.jsx(BreadcrumbPage, { children: "导演风格" }) })
     ] }) }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("h1", { className: "text-3xl font-bold text-gray-900 flex items-center gap-3", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(Palette, { className: "w-8 h-8" }),
-          "导演风格设定"
-        ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-gray-600 mt-1", children: "为整个项目设定统一的视觉风格，将自动应用到所有AI提示词" })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-2", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsxs(
-          Button,
-          {
-            variant: "outline",
-            onClick: () => {
-              setStyle({
-                artStyle: "",
-                colorTone: "",
-                lightingStyle: "",
-                cameraStyle: "",
-                mood: "",
-                customPrompt: "",
-                negativePrompt: "",
-                aspectRatio: "16:9",
-                videoFrameRate: "24",
-                motionIntensity: "normal"
-              });
-              safeToast("已重置所有风格设置");
-            },
-            className: "gap-2",
-            children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(RotateCcw, { className: "w-4 h-4" }),
-              "重置"
-            ]
-          }
-        ),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs(Button, { onClick: handleSave, className: "gap-2", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(Save, { className: "w-4 h-4" }),
-          "保存风格"
-        ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs(
-          Button,
-          {
-            variant: "secondary",
-            onClick: handleApplyStyleToAllPanels,
-            disabled: isApplyingToAll,
-            className: "gap-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600",
-            children: [
-              isApplyingToAll ? /* @__PURE__ */ jsxRuntimeExports.jsx(RefreshCw, { className: "w-4 h-4 animate-spin" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(Layers, { className: "w-4 h-4" }),
-              isApplyingToAll ? "正在应用..." : "应用到所有分镜"
-            ]
-          }
-        )
-      ] })
-    ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs(Card, { className: "bg-gradient-to-r from-purple-50 to-pink-50 border-purple-200", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx(CardHeader, { children: /* @__PURE__ */ jsxRuntimeExports.jsxs(CardTitle, { className: "flex items-center gap-2", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(WandSparkles, { className: "w-5 h-5 text-purple-600" }),
-        "风格预设模板"
-      ] }) }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs(CardContent, { children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3", children: Object.keys(DIRECTOR_STYLE_PRESETS).map((presetName) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
-          Button,
-          {
-            variant: "outline",
-            className: "h-auto py-4 flex flex-col gap-2 hover:bg-purple-100 hover:border-purple-400",
-            onClick: () => handleApplyPreset(presetName),
-            children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(Sparkles, { className: "w-5 h-5 text-purple-600" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-sm font-medium", children: presetName })
-            ]
-          },
-          presetName
-        )) }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-purple-700 mt-4", children: "💡 点击预设模板可快速应用经典电影风格，也可以自定义修改" })
-      ] })
-    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      PageHeader,
+      {
+        onReset: resetStyle,
+        onSave: handleSave,
+        onApplyToAll: handleApplyStyleToAllPanels,
+        isApplyingToAll
+      }
+    ),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(StylePresetSelector, { onApplyPreset: handleApplyPreset }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-1 lg:grid-cols-2 gap-6", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs(Card, { children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(CardHeader, { children: /* @__PURE__ */ jsxRuntimeExports.jsx(CardTitle, { className: "text-lg", children: "艺术风格" }) }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs(CardContent, { className: "space-y-3", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(Label, { children: "选择艺术风格" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs(Select, { value: style.artStyle, onValueChange: (value) => safeUpdateStyle("artStyle", value), children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(SelectTrigger, { children: /* @__PURE__ */ jsxRuntimeExports.jsx(SelectValue, { placeholder: "选择艺术风格" }) }),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs(SelectContent, { children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "写实主义", children: "写实主义" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "手绘动画", children: "手绘动画" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "唯美写实", children: "唯美写实" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "赛博朋克", children: "赛博朋克" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "复古胶片", children: "复古胶片" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "黑白胶片", children: "黑白胶片" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "水彩风格", children: "水彩风格" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "油画风格", children: "油画风格" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "漫画风格", children: "漫画风格" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "像素艺术", children: "像素艺术" })
-            ] })
-          ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-gray-500", children: "定义画面的整体艺术表现形式" })
-        ] })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs(Card, { children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(CardHeader, { children: /* @__PURE__ */ jsxRuntimeExports.jsx(CardTitle, { className: "text-lg", children: "色调设定" }) }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs(CardContent, { className: "space-y-3", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(Label, { children: "选择色调" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs(Select, { value: style.colorTone, onValueChange: (value) => safeUpdateStyle("colorTone", value), children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(SelectTrigger, { children: /* @__PURE__ */ jsxRuntimeExports.jsx(SelectValue, { placeholder: "选择色调" }) }),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs(SelectContent, { children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "温暖色调", children: "温暖色调" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "冷色调", children: "冷色调" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "中性色调", children: "中性色调" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "高饱和度", children: "高饱和度" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "低饱和度", children: "低饱和度" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "霓虹色彩", children: "霓虹色彩" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "黑白高对比", children: "黑白高对比" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "柔和色彩", children: "柔和色彩" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "复古色调", children: "复古色调" })
-            ] })
-          ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-gray-500", children: "设定画面的主色调和色彩倾向" })
-        ] })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs(Card, { children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(CardHeader, { children: /* @__PURE__ */ jsxRuntimeExports.jsx(CardTitle, { className: "text-lg", children: "光照风格" }) }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs(CardContent, { className: "space-y-3", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(Label, { children: "选择光照风格" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs(Select, { value: style.lightingStyle, onValueChange: (value) => safeUpdateStyle("lightingStyle", value), children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(SelectTrigger, { children: /* @__PURE__ */ jsxRuntimeExports.jsx(SelectValue, { placeholder: "选择光照风格" }) }),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs(SelectContent, { children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "自然光", children: "自然光" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "柔和光线", children: "柔和光线" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "戏剧性光影", children: "戏剧性光影" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "强对比光", children: "强对比光" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "霓虹灯光", children: "霓虹灯光" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "黄金时刻", children: "黄金时刻（Golden Hour）" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "蓝调时刻", children: "蓝调时刻（Blue Hour）" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "强烈阴影", children: "强烈阴影" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "均匀照明", children: "均匀照明" })
-            ] })
-          ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-gray-500", children: "控制画面的光影效果和氛围" })
-        ] })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs(Card, { children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(CardHeader, { children: /* @__PURE__ */ jsxRuntimeExports.jsx(CardTitle, { className: "text-lg", children: "镜头风格" }) }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs(CardContent, { className: "space-y-3", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(Label, { children: "选择镜头风格" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs(Select, { value: style.cameraStyle, onValueChange: (value) => safeUpdateStyle("cameraStyle", value), children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(SelectTrigger, { children: /* @__PURE__ */ jsxRuntimeExports.jsx(SelectValue, { placeholder: "选择镜头风格" }) }),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs(SelectContent, { children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "电影感", children: "电影感（Cinematic）" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "纪实风格", children: "纪实风格（Documentary）" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "梦幻风格", children: "梦幻风格（Dreamy）" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "IMAX", children: "IMAX 大画幅" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "手持摄影", children: "手持摄影（Handheld）" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "稳定器", children: "稳定器拍摄（Gimbal）" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "广角镜头", children: "广角镜头" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "长焦镜头", children: "长焦镜头" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "鱼眼镜头", children: "鱼眼镜头" })
-            ] })
-          ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-gray-500", children: "定义镜头的拍摄风格和视角" })
-        ] })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs(Card, { children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(CardHeader, { children: /* @__PURE__ */ jsxRuntimeExports.jsx(CardTitle, { className: "text-lg", children: "情绪氛围" }) }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs(CardContent, { className: "space-y-3", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(Label, { children: "选择情绪氛围" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs(Select, { value: style.mood, onValueChange: (value) => safeUpdateStyle("mood", value), children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(SelectTrigger, { children: /* @__PURE__ */ jsxRuntimeExports.jsx(SelectValue, { placeholder: "选择情绪氛围" }) }),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs(SelectContent, { children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "温馨", children: "温馨" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "紧张", children: "紧张" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "神秘", children: "神秘" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "欢快", children: "欢快" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "悲伤", children: "悲伤" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "浪漫", children: "浪漫" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "恐怖", children: "恐怖" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "史诗", children: "史诗感" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "忧郁", children: "忧郁" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "激动", children: "激动人心" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "宁静", children: "宁静" })
-            ] })
-          ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-gray-500", children: "设定画面传递的整体情绪" })
-        ] })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs(Card, { children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(CardHeader, { children: /* @__PURE__ */ jsxRuntimeExports.jsx(CardTitle, { className: "text-lg", children: "画面比例" }) }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs(CardContent, { className: "space-y-3", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(Label, { children: "选择画面比例" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs(Select, { value: style.aspectRatio || "16:9", onValueChange: (value) => safeUpdateStyle("aspectRatio", value), children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(SelectTrigger, { children: /* @__PURE__ */ jsxRuntimeExports.jsx(SelectValue, { placeholder: "选择画面比例" }) }),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs(SelectContent, { children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "16:9", children: "16:9（电影/横屏）" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "4:3", children: "4:3（传统电视）" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "1:1", children: "1:1（方形/社交媒体）" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "9:16", children: "9:16（竖屏/短视频）" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "21:9", children: "21:9（超宽屏/电影院）" })
-            ] })
-          ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-gray-500", children: "定义生成图片和视频的宽高比" })
-        ] })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs(Card, { children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(CardHeader, { children: /* @__PURE__ */ jsxRuntimeExports.jsx(CardTitle, { className: "text-lg", children: "视频帧率" }) }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs(CardContent, { className: "space-y-3", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(Label, { children: "选择帧率" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs(Select, { value: style.videoFrameRate || "24", onValueChange: (value) => safeUpdateStyle("videoFrameRate", value), children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(SelectTrigger, { children: /* @__PURE__ */ jsxRuntimeExports.jsx(SelectValue, { placeholder: "选择帧率" }) }),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs(SelectContent, { children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "24", children: "24 fps（电影标准）" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "30", children: "30 fps（电视/网络）" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "60", children: "60 fps（流畅/游戏）" })
-            ] })
-          ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-gray-500", children: "视频的帧率设置，影响流畅度" })
-        ] })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs(Card, { children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(CardHeader, { children: /* @__PURE__ */ jsxRuntimeExports.jsx(CardTitle, { className: "text-lg", children: "运动强度" }) }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs(CardContent, { className: "space-y-3", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(Label, { children: "选择运动强度" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs(Select, { value: style.motionIntensity || "normal", onValueChange: (value) => safeUpdateStyle("motionIntensity", value), children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(SelectTrigger, { children: /* @__PURE__ */ jsxRuntimeExports.jsx(SelectValue, { placeholder: "选择运动强度" }) }),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs(SelectContent, { children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "subtle", children: "微妙（细腻动作）" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "normal", children: "正常（标准运动）" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "dynamic", children: "强烈（动态激烈）" })
-            ] })
-          ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-gray-500", children: "控制视频中的运动幅度和动态感" })
-        ] })
-      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        StyleSelect,
+        {
+          label: "艺术风格",
+          description: "定义画面的整体艺术表现形式",
+          value: style.artStyle,
+          onChange: (value) => safeUpdateStyle("artStyle", value),
+          options: ART_STYLE_OPTIONS
+        }
+      ),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        StyleSelect,
+        {
+          label: "色调设定",
+          description: "设定画面的主色调和色彩倾向",
+          value: style.colorTone,
+          onChange: (value) => safeUpdateStyle("colorTone", value),
+          options: COLOR_TONE_OPTIONS
+        }
+      ),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        StyleSelect,
+        {
+          label: "光照风格",
+          description: "控制画面的光影效果和氛围",
+          value: style.lightingStyle,
+          onChange: (value) => safeUpdateStyle("lightingStyle", value),
+          options: LIGHTING_STYLE_OPTIONS
+        }
+      ),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        StyleSelect,
+        {
+          label: "镜头风格",
+          description: "定义镜头的拍摄风格和视角",
+          value: style.cameraStyle,
+          onChange: (value) => safeUpdateStyle("cameraStyle", value),
+          options: CAMERA_STYLE_OPTIONS
+        }
+      ),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        StyleSelect,
+        {
+          label: "情绪氛围",
+          description: "设定画面传递的整体情绪",
+          value: style.mood,
+          onChange: (value) => safeUpdateStyle("mood", value),
+          options: MOOD_OPTIONS
+        }
+      ),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        StyleSelect,
+        {
+          label: "画面比例",
+          description: "定义生成图片和视频的宽高比",
+          value: style.aspectRatio || "16:9",
+          onChange: (value) => safeUpdateStyle("aspectRatio", value),
+          options: ASPECT_RATIO_OPTIONS
+        }
+      ),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        StyleSelect,
+        {
+          label: "视频帧率",
+          description: "视频的帧率设置，影响流畅度",
+          value: style.videoFrameRate || "24",
+          onChange: (value) => safeUpdateStyle("videoFrameRate", value),
+          options: FRAME_RATE_OPTIONS
+        }
+      ),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        StyleSelect,
+        {
+          label: "运动强度",
+          description: "控制视频中的运动幅度和动态感",
+          value: style.motionIntensity || "normal",
+          onChange: (value) => safeUpdateStyle("motionIntensity", value),
+          options: MOTION_INTENSITY_OPTIONS
+        }
+      ),
       /* @__PURE__ */ jsxRuntimeExports.jsxs(Card, { className: "lg:col-span-2", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(CardHeader, { children: /* @__PURE__ */ jsxRuntimeExports.jsx(CardTitle, { className: "text-lg", children: "自定义提示词" }) }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs(CardContent, { className: "space-y-3", children: [
@@ -22477,89 +22394,7 @@ function DirectorStyleEditor() {
         ] })
       ] })
     ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs(Card, { className: "bg-gradient-to-br from-blue-50 to-purple-50 border-blue-200", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx(CardHeader, { children: /* @__PURE__ */ jsxRuntimeExports.jsxs(CardTitle, { className: "flex items-center gap-2", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(Sparkles, { className: "w-5 h-5 text-blue-600" }),
-        "当前风格预览"
-      ] }) }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs(CardContent, { children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white rounded-lg p-6 space-y-4", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-2 md:grid-cols-4 gap-4", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-gray-500 mb-1", children: "艺术风格" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-medium text-blue-600", children: style.artStyle || "未设置" })
-            ] }),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-gray-500 mb-1", children: "色调" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-medium text-green-600", children: style.colorTone || "未设置" })
-            ] }),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-gray-500 mb-1", children: "光照" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-medium text-orange-600", children: style.lightingStyle || "未设置" })
-            ] }),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-gray-500 mb-1", children: "镜头" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-medium text-purple-600", children: style.cameraStyle || "未设置" })
-            ] }),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-gray-500 mb-1", children: "情绪" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-medium text-pink-600", children: style.mood || "未设置" })
-            ] }),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-gray-500 mb-1", children: "画面比例" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-medium text-indigo-600", children: style.aspectRatio || "16:9" })
-            ] }),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-gray-500 mb-1", children: "帧率" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "font-medium text-cyan-600", children: [
-                style.videoFrameRate || "24",
-                "fps"
-              ] })
-            ] }),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-gray-500 mb-1", children: "运动强度" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-medium text-amber-600", children: style.motionIntensity === "subtle" ? "微妙" : style.motionIntensity === "dynamic" ? "强烈" : "正常" })
-            ] })
-          ] }),
-          style.customPrompt && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "pt-4 border-t", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-gray-500 mb-2", children: "自定义提示词" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-mono bg-gray-50 p-3 rounded border", children: style.customPrompt })
-          ] })
-        ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-4 p-4 bg-blue-100 border border-blue-300 rounded-lg", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-sm text-blue-900", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(Sparkles, { className: "w-4 h-4 inline mr-2" }),
-            "这些风格设定将自动应用到："
-          ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("ul", { className: "text-sm text-blue-800 mt-2 ml-6 list-disc space-y-1", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "项目库中的角色AI提示词生成" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "项目库中的场景AI提示词生成" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "分镜的AI绘画提示词生成" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "分镜的AI视频提示词生成" })
-          ] })
-        ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-4 p-4 bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-lg", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-medium text-purple-900 mb-3", children: "📸 示例分镜提示词预览（基于当前风格）" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white rounded-md p-4 border", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-gray-500 mb-2", children: "示例场景：森林中奔跑的少年" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-sm font-mono text-gray-700 leading-relaxed", children: [
-              "中景镜头，年轻少年在森林小径上奔跑",
-              style.artStyle && `，${style.artStyle}风格`,
-              style.colorTone && `，${style.colorTone}`,
-              style.lightingStyle && `，${style.lightingStyle}照明`,
-              style.cameraStyle && `，${style.cameraStyle}镜头`,
-              style.mood && `，${style.mood}的氛围`,
-              "，高质量渲染，分镜级别细节",
-              style.customPrompt && `，${style.customPrompt}`
-            ] })
-          ] }),
-          style.negativePrompt && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-3 bg-red-50 rounded-md p-3 border border-red-200", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-red-600 mb-1", children: "负面提示词：" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs font-mono text-red-700", children: style.negativePrompt })
-          ] })
-        ] })
-      ] })
-    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(StylePreview, { style }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(
       StyleApplicationSettingsPanel,
       {
@@ -22567,6 +22402,154 @@ function DirectorStyleEditor() {
         onSettingsChange: safeUpdateStyleSettings
       }
     )
+  ] });
+}
+function PageHeader({
+  onReset,
+  onSave,
+  onApplyToAll,
+  isApplyingToAll
+}) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("h1", { className: "text-3xl font-bold text-gray-900 flex items-center gap-3", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(Palette, { className: "w-8 h-8" }),
+        "导演风格设定"
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-gray-600 mt-1", children: "为整个项目设定统一的视觉风格，将自动应用到所有AI提示词" })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-2", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs(Button, { variant: "outline", onClick: onReset, className: "gap-2", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(RotateCcw, { className: "w-4 h-4" }),
+        "重置"
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs(Button, { onClick: onSave, className: "gap-2", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(Save, { className: "w-4 h-4" }),
+        "保存风格"
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        Button,
+        {
+          variant: "secondary",
+          onClick: onApplyToAll,
+          disabled: isApplyingToAll,
+          className: "gap-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600",
+          children: [
+            isApplyingToAll ? /* @__PURE__ */ jsxRuntimeExports.jsx(RefreshCw, { className: "w-4 h-4 animate-spin" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(Layers, { className: "w-4 h-4" }),
+            isApplyingToAll ? "正在应用..." : "应用到所有分镜"
+          ]
+        }
+      )
+    ] })
+  ] });
+}
+function StylePresetSelector({ onApplyPreset }) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs(Card, { className: "bg-gradient-to-r from-purple-50 to-pink-50 border-purple-200", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx(CardHeader, { children: /* @__PURE__ */ jsxRuntimeExports.jsxs(CardTitle, { className: "flex items-center gap-2", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(WandSparkles, { className: "w-5 h-5 text-purple-600" }),
+      "风格预设模板"
+    ] }) }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs(CardContent, { children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3", children: Object.keys(DIRECTOR_STYLE_PRESETS).map((presetName) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        Button,
+        {
+          variant: "outline",
+          className: "h-auto py-4 flex flex-col gap-2 hover:bg-purple-100 hover:border-purple-400",
+          onClick: () => onApplyPreset(presetName),
+          children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(Sparkles, { className: "w-5 h-5 text-purple-600" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-sm font-medium", children: presetName })
+          ]
+        },
+        presetName
+      )) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-purple-700 mt-4", children: "💡 点击预设模板可快速应用经典电影风格，也可以自定义修改" })
+    ] })
+  ] });
+}
+function StylePreview({ style }) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs(Card, { className: "bg-gradient-to-br from-blue-50 to-purple-50 border-blue-200", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx(CardHeader, { children: /* @__PURE__ */ jsxRuntimeExports.jsxs(CardTitle, { className: "flex items-center gap-2", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(Sparkles, { className: "w-5 h-5 text-blue-600" }),
+      "当前风格预览"
+    ] }) }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs(CardContent, { children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white rounded-lg p-6 space-y-4", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-2 md:grid-cols-4 gap-4", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(PreviewItem, { label: "艺术风格", value: style.artStyle, color: "blue" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(PreviewItem, { label: "色调", value: style.colorTone, color: "green" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(PreviewItem, { label: "光照", value: style.lightingStyle, color: "orange" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(PreviewItem, { label: "镜头", value: style.cameraStyle, color: "purple" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(PreviewItem, { label: "情绪", value: style.mood, color: "pink" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(PreviewItem, { label: "画面比例", value: style.aspectRatio || "16:9", color: "indigo" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(PreviewItem, { label: "帧率", value: `${style.videoFrameRate || "24"}fps`, color: "cyan" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            PreviewItem,
+            {
+              label: "运动强度",
+              value: MOTION_INTENSITY_LABELS[style.motionIntensity || "normal"] || "正常",
+              color: "amber"
+            }
+          )
+        ] }),
+        style.customPrompt && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "pt-4 border-t", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-gray-500 mb-2", children: "自定义提示词" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-mono bg-gray-50 p-3 rounded border", children: style.customPrompt })
+        ] })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-4 p-4 bg-blue-100 border border-blue-300 rounded-lg", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-sm text-blue-900", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(Sparkles, { className: "w-4 h-4 inline mr-2" }),
+          "这些风格设定将自动应用到："
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("ul", { className: "text-sm text-blue-800 mt-2 ml-6 list-disc space-y-1", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "项目库中的角色AI提示词生成" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "项目库中的场景AI提示词生成" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "分镜的AI绘画提示词生成" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "分镜的AI视频提示词生成" })
+        ] })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-4 p-4 bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-lg", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-medium text-purple-900 mb-3", children: "📸 示例分镜提示词预览（基于当前风格）" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white rounded-md p-4 border", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-gray-500 mb-2", children: "示例场景：森林中奔跑的少年" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-sm font-mono text-gray-700 leading-relaxed", children: [
+            "中景镜头，年轻少年在森林小径上奔跑",
+            style.artStyle && `，${style.artStyle}风格`,
+            style.colorTone && `，${style.colorTone}`,
+            style.lightingStyle && `，${style.lightingStyle}照明`,
+            style.cameraStyle && `，${style.cameraStyle}镜头`,
+            style.mood && `，${style.mood}的氛围`,
+            "，高质量渲染，分镜级别细节",
+            style.customPrompt && `，${style.customPrompt}`
+          ] })
+        ] }),
+        style.negativePrompt && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-3 bg-red-50 rounded-md p-3 border border-red-200", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-red-600 mb-1", children: "负面提示词：" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs font-mono text-red-700", children: style.negativePrompt })
+        ] })
+      ] })
+    ] })
+  ] });
+}
+function PreviewItem({
+  label,
+  value,
+  color
+}) {
+  const colorClasses = {
+    blue: "text-blue-600",
+    green: "text-green-600",
+    orange: "text-orange-600",
+    purple: "text-purple-600",
+    pink: "text-pink-600",
+    indigo: "text-indigo-600",
+    cyan: "text-cyan-600",
+    amber: "text-amber-600"
+  };
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-gray-500 mb-1", children: label }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: `font-medium ${colorClasses[color] || "text-gray-600"}`, children: value || "未设置" })
   ] });
 }
 function Settings() {
